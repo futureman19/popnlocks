@@ -19,7 +19,7 @@ Forging settlement data requires performing the work being measured. The oracle 
 
 ## Status
 
-POP-0 (binary difficulty market) — mainnet end-to-end run executed 2026-11-06: deploy → 3 cranks → settle, all mined in block **974267**. See [`docs/POP-0-binary-difficulty-market.md`](docs/POP-0-binary-difficulty-market.md) for the full spec, evidence txids, and ops notes.
+POP-0 (binary difficulty market) — mainnet end-to-end run executed 2026-11-06: deploy → 3 cranks → settle, all mined in block **974267**. See [`docs/POP-0-binary-difficulty-market.md`](docs/POP-0-binary-difficulty-market.md) for the full spec, evidence txids, and ops notes — and [`docs/writeup-pop-0.md`](docs/writeup-pop-0.md) for the long-form account. Site: [popnlocks.com](https://popnlocks.com).
 
 ## Build & test
 
