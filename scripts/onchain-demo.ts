@@ -120,12 +120,12 @@ function targetOfHeader(headerHex: string): bigint {
 }
 
 async function withRetry<T>(fn: () => Promise<T>, label: string): Promise<T> {
-    for (let attempt = 1; attempt <= 6; attempt++) {
+    for (let attempt = 1; attempt <= 10; attempt++) {
         try {
             return await fn()
         } catch (e) {
             const msg = e instanceof Error ? e.message : String(e)
-            if (msg.includes('429') && attempt < 6) {
+            if (/429|too many requests/i.test(msg) && attempt < 10) {
                 const wait = 65
                 console.log(
                     `${label}: rate-limited, waiting ${wait}s (attempt ${attempt}/6)`
