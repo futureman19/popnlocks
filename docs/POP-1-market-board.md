@@ -63,8 +63,15 @@ Anchor rule (from POP-0 §risks): anchor block must have ≥6 confirmations at d
 - Limits: max stake per market, max daily exposure, `STOP_MAKER` killfile honored
   within 30s. Default mode on first deploy: **dry-run** (quotes computed, no signing)
   until the user flips it live.
-- Maker keys live in a separate funded wallet (`maker/.env`, gitignored), never the
-  treasury, never the repo.
+- **Custody: the Dogfood wallet vault** (`C:/Users/futur/Desktop/dogfood-wallet`).
+  The maker bot holds NO keys. For each match it builds the deploy tx via WO-1,
+  self-verifies the covenant output, then asks the vault to sign the maker input
+  via a new guarded CLI primitive (`popnlocks-sign`, WO-5): the vault gates on a
+  `popnlocks` policy block (maxPerTxSats / maxPerDaySats, killfile, fail-closed
+  when absent), records evidence, and returns the half-signed hex. Broadcast stays
+  taker-side. Exposure = the policy caps; owner recovery = the vault's normal
+  sweep. A BRC-0204 allowance-locked float is the v2 upgrade if the maker ever
+  needs to sign unattended at higher volume.
 
 ## 5. Board UI (popnlocks.com)
 
