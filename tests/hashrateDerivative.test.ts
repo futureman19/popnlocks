@@ -11,6 +11,7 @@ import {
     toByteString,
 } from 'scrypt-ts'
 import chaiAsPromised from 'chai-as-promised'
+import { createHash } from 'crypto'
 import * as fs from 'fs'
 import * as path from 'path'
 
@@ -22,9 +23,7 @@ const fixture = JSON.parse(
     fs.readFileSync(path.join(__dirname, 'fixtures', 'headers.json'), 'utf8')
 )
 
-const HEADERS = fixture.headers.map((h: string) =>
-    toByteString(h)
-) as FixedArray<ByteString, 16>
+const ALL_HEADERS: string[] = fixture.headers
 const ANCHOR = toByteString(fixture.anchor_internal_hex) as ByteString
 const ENDPOINT_TARGET = BigInt(fixture.endpoint_target)
 
@@ -40,6 +39,15 @@ const CRANK_PKH = PubKeyHash(
 
 const POT = 10000
 const BOUNTY = 100n
+const CHUNK = 4
+const N_CHUNKS = ALL_HEADERS.length / CHUNK // 4
+
+// Raw (internal-order) sha256d of a header hex — matches the contract's hash256 output.
+function sha256dHex(hex: string): string {
+    const b = Buffer.from(hex, 'hex')
+    const h1 = createHash('sha256').update(b).digest()
+    return createHash('sha256').update(h1).digest('hex')
+}
 
 // Off-chain mirror of the contract's bits2target, for the client-side tx builder.
 // The contract remains the authority: a builder that pays the wrong side fails
@@ -95,68 +103,97 @@ async function deployMarket(strikeTarget: bigint) {
         strikeTarget,
         YES_PKH,
         NO_PKH,
-        BOUNTY
+        BOUNTY,
+        ANCHOR, // ladder starts at the anchor
+        0n, // headersSeen
+        0n // endpointTarget (captured at rung 3)
     )
     await market.connect(getDefaultSigner())
     await market.deploy(POT)
-    // The client derives the outcome from the same public headers; the contract
-    // re-derives and enforces it on-chain.
-    const winner =
-        endpointTargetOf(fixture.headers[12]) <= strikeTarget ? YES_PKH : NO_PKH
-    market.bindTxBuilder(
-        'settle',
-        settleTxBuilder(winner, BigInt(POT) - BOUNTY)
-    )
     return market
 }
 
-function tamperedHeaders(
-    index: number,
-    byteOffset: number
-): FixedArray<ByteString, 16> {
-    const copy = fixture.headers.slice()
-    const h = copy[index]
-    copy[index] = h.slice(0, byteOffset) + 'ff' + h.slice(byteOffset + 2)
-    return copy.map((x: string) => toByteString(x)) as FixedArray<
-        ByteString,
-        16
-    >
+function chunkHeaders(c: number): FixedArray<ByteString, 4> {
+    return ALL_HEADERS.slice(c * CHUNK, c * CHUNK + CHUNK).map((h) =>
+        toByteString(h)
+    ) as FixedArray<ByteString, 4>
 }
 
-describe('HDRAFT-0001 PoC: Binary Difficulty Market', () => {
+// Drive the full 4-rung settlement ladder. Options inject attacks.
+async function runLadder(
+    strike: bigint,
+    opts: { tamperChunk?: number; wrongWinner?: boolean } = {}
+) {
+    let current = await deployMarket(strike)
+    for (let c = 0; c < N_CHUNKS; c++) {
+        const hexes = ALL_HEADERS.slice(c * CHUNK, c * CHUNK + CHUNK)
+        if (opts.tamperChunk === c) {
+            const h = hexes[1]
+            hexes[1] = h.slice(0, 152) + 'ff' + h.slice(154) // flip nonce byte
+        }
+        const chunk = hexes.map((h) => toByteString(h)) as FixedArray<
+            ByteString,
+            4
+        >
+        const isFinal = c === N_CHUNKS - 1
+
+        if (!isFinal) {
+            const next = current.next()
+            next.tipHash = toByteString(sha256dHex(hexes[CHUNK - 1]))
+            next.headersSeen = BigInt((c + 1) * CHUNK)
+            next.endpointTarget = current.endpointTarget
+            await current.methods.settle(chunk, CRANK_PKH, {
+                next: { instance: next, balance: POT },
+            } as MethodCallOptions<HashrateDerivative>)
+            current = next
+        } else {
+            let winner =
+                endpointTargetOf(ALL_HEADERS[12]) <= strike ? YES_PKH : NO_PKH
+            if (opts.wrongWinner) {
+                winner = winner === YES_PKH ? NO_PKH : YES_PKH
+            }
+            current.bindTxBuilder(
+                'settle',
+                settleTxBuilder(winner, BigInt(POT) - BOUNTY)
+            )
+            await current.methods.settle(chunk, CRANK_PKH)
+        }
+    }
+}
+
+describe('HDRAFT-0001 PoC: Binary Difficulty Market — chunked ladder', () => {
     before(async () => {
         await HashrateDerivative.loadArtifact()
     })
 
-    it('settles YES when strike equals the real endpoint target', async () => {
-        const market = await deployMarket(ENDPOINT_TARGET)
-        const call = async () => market.methods.settle(HEADERS, CRANK_PKH)
-        await expect(call()).not.to.be.rejected
+    it('settles YES through 4 cranks when strike equals the real endpoint target', async () => {
+        await expect(runLadder(ENDPOINT_TARGET)).not.to.be.rejected
     })
 
     it('settles NO when strike demands more difficulty than the endpoint has', async () => {
-        // strike target one less than endpoint target => endpointTarget <= strike fails
-        const market = await deployMarket(ENDPOINT_TARGET - 1n)
-        const call = async () => market.methods.settle(HEADERS, CRANK_PKH)
-        await expect(call()).not.to.be.rejected
+        await expect(runLadder(ENDPOINT_TARGET - 1n)).not.to.be.rejected
     })
 
-    it('rejects a chain with broken linkage (swapped headers)', async () => {
-        const copy = fixture.headers.slice()
-        ;[copy[3], copy[4]] = [copy[4], copy[3]]
-        const swapped = copy.map((x: string) => toByteString(x)) as FixedArray<
-            ByteString,
-            16
-        >
-        const market = await deployMarket(ENDPOINT_TARGET)
-        const call = async () => market.methods.settle(swapped, CRANK_PKH)
-        await expect(call()).to.be.rejected
+    it('rejects a tampered header mid-ladder (chunk 1 nonce flip)', async () => {
+        await expect(runLadder(ENDPOINT_TARGET, { tamperChunk: 1 })).to.be
+            .rejected
     })
 
-    it('rejects a tampered header (nonce flipped breaks PoW + downstream linkage)', async () => {
-        const tampered = tamperedHeaders(5, 152) // last byte of nonce (hex offset 152..154)
+    it('rejects a cranker who builds the payout to the wrong side', async () => {
+        await expect(runLadder(ENDPOINT_TARGET, { wrongWinner: true })).to.be
+            .rejected
+    })
+
+    it('rejects skipping ahead (chunk 1 offered first breaks linkage)', async () => {
         const market = await deployMarket(ENDPOINT_TARGET)
-        const call = async () => market.methods.settle(tampered, CRANK_PKH)
+        const next = market.next()
+        next.tipHash = toByteString(sha256dHex(ALL_HEADERS[7]))
+        next.headersSeen = 8n
+        next.endpointTarget = 0n
+        const call = async () =>
+            market.methods.settle(chunkHeaders(1), CRANK_PKH, {
+                next: { instance: next, balance: POT },
+            } as MethodCallOptions<HashrateDerivative>)
         await expect(call()).to.be.rejected
     })
 })

@@ -9,19 +9,21 @@ import {
     FixedArray,
     Utils,
     slice,
+    toByteString,
 } from 'scrypt-ts'
 
 /*
- * HDRAFT-0001 PoC — Binary Difficulty Market, stateless core.
+ * HDRAFT-0001 PoC — Binary Difficulty Market, chunked settlement ladder.
  *
- * One-shot covenant: YES and NO collateral locked at deploy. Anyone settles by
- * presenting the 16 real headers following the anchor (12-block window + 4
- * confirmation). The contract verifies linkage + per-header PoW in-script,
- * reads difficulty (bits -> target) at the endpoint header, pays the winner,
- * and pays a bounty to whoever cranked settlement.
+ * YES/NO collateral locked at deploy. Settlement is anyone-callable and runs
+ * as a ladder: each crank verifies a chunk of CHUNK headers (linkage +
+ * per-header PoW in-script), carries state forward in a continuation output,
+ * and the final crank triggers payout — winner takes pot minus bounty, the
+ * cranker claims the bounty.
  *
- * PoC scope: single-call settle over 16 headers. The chunked ladder (§3.3 of
- * the spec) is the same verification loop with continuation state — next gate.
+ * Test geometry: 16 headers after the anchor (12-block window + 4 confirm),
+ * chunks of 4. Production geometry per spec §3.3: W=2016+M, chunks of 144 —
+ * identical code path, larger FixedArray.
  */
 export class HashrateDerivative extends SmartContract {
     // Internal byte order (raw sha256d digest order) of the anchor block hash.
@@ -41,7 +43,18 @@ export class HashrateDerivative extends SmartContract {
     @prop()
     bounty: bigint
 
-    static readonly N_HEADERS: bigint = 16n
+    // --- ladder state ---
+    @prop(true)
+    tipHash: ByteString // last verified header digest (internal order)
+
+    @prop(true)
+    headersSeen: bigint
+
+    @prop(true)
+    endpointTarget: bigint // captured when the ladder crosses ENDPOINT_IDX
+
+    static readonly CHUNK: bigint = 4n
+    static readonly TOTAL: bigint = 16n
     static readonly ENDPOINT_IDX: bigint = 12n
 
     constructor(
@@ -49,7 +62,10 @@ export class HashrateDerivative extends SmartContract {
         strikeTarget: bigint,
         yesPKH: PubKeyHash,
         noPKH: PubKeyHash,
-        bounty: bigint
+        bounty: bigint,
+        tipHash: ByteString,
+        headersSeen: bigint,
+        endpointTarget: bigint
     ) {
         super(...arguments)
         this.anchorTip = anchorTip
@@ -57,6 +73,9 @@ export class HashrateDerivative extends SmartContract {
         this.yesPKH = yesPKH
         this.noPKH = noPKH
         this.bounty = bounty
+        this.tipHash = tipHash
+        this.headersSeen = headersSeen
+        this.endpointTarget = endpointTarget
     }
 
     // Expand Bitcoin's compact bits to the full 256-bit target.
@@ -75,11 +94,11 @@ export class HashrateDerivative extends SmartContract {
     }
 
     @method()
-    public settle(headers: FixedArray<ByteString, 16>, crankPKH: PubKeyHash) {
-        let prev: ByteString = this.anchorTip
-        let endpointTarget: bigint = 0n
+    public settle(headers: FixedArray<ByteString, 4>, crankPKH: PubKeyHash) {
+        let prev: ByteString = this.tipHash
+        let endpointTarget: bigint = this.endpointTarget
 
-        for (let i: bigint = 0n; i < HashrateDerivative.N_HEADERS; i++) {
+        for (let i: bigint = 0n; i < HashrateDerivative.CHUNK; i++) {
             const header: ByteString = headers[Number(i)]
 
             // 1. Linkage: this header's prevHash must equal the previous digest.
@@ -92,22 +111,32 @@ export class HashrateDerivative extends SmartContract {
             const digest: ByteString = hash256(header)
             assert(Utils.fromLEUnsigned(digest) < target, 'insufficient PoW')
 
-            if (i == HashrateDerivative.ENDPOINT_IDX) {
+            if (this.headersSeen + i == HashrateDerivative.ENDPOINT_IDX) {
                 endpointTarget = target
             }
             prev = digest
         }
 
-        // 3. Outcome: difficulty at/above strike <=> endpoint target at/below strike target.
-        const winner: PubKeyHash =
-            endpointTarget <= this.strikeTarget ? this.yesPKH : this.noPKH
-
-        // 4. Payout: winner gets pot minus bounty; cranker claims the bounty.
+        const seen: bigint = this.headersSeen + HashrateDerivative.CHUNK
         const balance: bigint = this.ctx.utxo.value
-        const outputs: ByteString =
-            Utils.buildPublicKeyHashOutput(winner, balance - this.bounty) +
-            Utils.buildPublicKeyHashOutput(crankPKH, this.bounty) +
-            this.buildChangeOutput()
+        let outputs: ByteString = toByteString('')
+
+        if (seen < HashrateDerivative.TOTAL) {
+            // Mid-ladder: carry state forward, pot preserved in full.
+            this.tipHash = prev
+            this.headersSeen = seen
+            this.endpointTarget = endpointTarget
+            outputs = this.buildStateOutput(balance) + this.buildChangeOutput()
+        } else {
+            // Final crank: difficulty at/above strike <=> target at/below strike.
+            const winner: PubKeyHash =
+                endpointTarget <= this.strikeTarget ? this.yesPKH : this.noPKH
+            outputs =
+                Utils.buildPublicKeyHashOutput(winner, balance - this.bounty) +
+                Utils.buildPublicKeyHashOutput(crankPKH, this.bounty) +
+                this.buildChangeOutput()
+        }
+
         assert(this.ctx.hashOutputs == hash256(outputs), 'hashOutputs mismatch')
     }
 }

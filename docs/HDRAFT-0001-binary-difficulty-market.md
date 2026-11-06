@@ -1,12 +1,14 @@
 # HDRAFT-0001: Binary Difficulty Markets (Self-Settling Hashrate Derivative)
 
-**Status: DRAFT — core primitive PoC-verified.**
+**Status: DRAFT — core primitive + chunked settlement ladder PoC-verified.**
 Validated (2026-11-05, sCrypt 1.4.5 local VM): in-script verification of 17 real BSV
 mainnet headers (anchor 830000) — linkage, sha256d-vs-bits PoW, bits2target expansion,
-endpoint strike comparison, winner + crank-bounty payout outputs. Negative tests
-(swapped linkage, tampered nonce) correctly rejected. 4/4 tests green.
-Pending: chunked settlement ladder for large W, DAA-consistency check (§4),
-fee/bounty calibration, testnet run.
+endpoint strike comparison. Settlement runs as a stateful ladder (4 cranks × 4 headers
+in test geometry; production: chunks of 144): continuation outputs carry
+tipHash/headersSeen/endpointTarget, final crank pays winner + bounty. Negative tests
+green: tampered mid-ladder header, wrong-winner payout builder, skip-ahead linkage
+break. 5/5 tests green.
+Pending: DAA-consistency check (§4), fee/bounty calibration, testnet run.
 
 ## 1. Concept
 
