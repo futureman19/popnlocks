@@ -141,10 +141,12 @@ async function withRetry<T>(fn: () => Promise<T>, label: string): Promise<T> {
 
 async function main() {
     await HashrateDerivative.loadArtifact()
-    const signer = mainnetSigner()
-    const addr = await signer.getDefaultAddress()
+    const [signer, addr, bal] = await withRetry(async () => {
+        const s = mainnetSigner()
+        const b = await s.getBalance() // forces provider connect + UTXO fetch
+        return [s, await s.getDefaultAddress(), b] as const
+    }, 'connect')
     console.log('demo key mainnet address:', addr.toString())
-    const bal = await signer.getBalance()
     console.log('balance:', bal.confirmed, '+', bal.unconfirmed, 'unconfirmed')
 
     let market = new HashrateDerivative(
