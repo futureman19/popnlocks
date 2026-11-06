@@ -89,19 +89,33 @@ Each call:
 The crank is agnostic — the contract computes the winner; the bounty only buys speed.
 Liveness is guaranteed by the winner's own incentive to settle.
 
-## 4. The DAA-Consistency Check (main engineering risk)
+## 4. The DAA-Consistency Check — RESOLVED (Lite tier, PoC-verified)
 
-Without bounding how `bits` evolves, a cranker could present a privately-mined chain
-with inflated declared difficulty. Two rigor tiers:
+**Finding (2026-11-05):** BSV's consensus DAA is **cw-144** (`GetNextCashWorkRequired`
+in bitcoin-sv `pow.cpp`): each block's `bits` is recomputed from the chainwork and
+clamped elapsed time over the _trailing 144 blocks_ (median-of-3 endpoints).
+Full in-script replication is therefore O(W×144) data — every header's check needs its
+own 144-block context. That kills the Full tier for a ladder design regardless of
+script budget.
 
-- **Full (target):** recompute BSV's consensus DAA in-script per header
-  (ASERT-family, integer exponential math on header timestamps — heavy but bounded).
-  Exact DAA constants to be confirmed against a node implementation at build time.
-- **Lite (V1):** bound per-header `bits` change to the consensus maximum and require
-  every header's PoW to meet a fixed floor (`strikeTarget × 2`). Faking the window
-  then costs ≥ real work at strike-adjacent difficulty; the economic bound in §5
-  carries the rest. Honest trade-off: Lite admits a small manipulation band around
-  the strike — compensate by keeping pots small (§5).
+**V1 ships Lite, now implemented and tested:**
+
+- **Per-header drift bound:** each header's target within ±5% of its predecessor's
+  (natural cw-144 drift measured at ≤1.9%/block on the golden mainnet window).
+- **Anchor-relative difficulty floor:** no header's target may exceed 8× the anchor's,
+  so faking the window costs ≥ ~1/8 of real mainnet work per block — the §5 pot cap
+  prices the residual band.
+- Drift base (`prevTarget`) is carried in covenant state across chunks — no free reset
+  at chunk boundaries.
+
+Test evidence: synthetic chains ground at trivial difficulty — a rule-abiding chain
+passes (control), a ×3 drift jump is rejected on the drift bound, a ×3855 floor breach
+is rejected on the floor assert. 8/8 green.
+
+**Residual honesty:** an attacker can still drift difficulty ±5%/block _within_ the
+floor over many blocks; the defense is economic (§5 sizing) plus counterparties
+choosing strikes away from the floor band. A V2 challenge window (§5) closes this
+further by letting heavier chains contest settlement.
 
 ## 5. Fork/Manipulation Economics
 
