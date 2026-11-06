@@ -17,6 +17,7 @@ import {
     bsv,
     toByteString,
 } from 'scrypt-ts'
+import type { AddressOption, UTXO } from 'scrypt-ts/dist/bsv/types'
 import { createHash } from 'crypto'
 import * as fs from 'fs'
 import * as path from 'path'
@@ -48,9 +49,47 @@ const ownPKH = PubKeyHash(
 // mainnet key. NOTE: bsv v2 fromBuffer/fromHex mis-derive the pubkey — use the
 // hex constructor (verified: matches the funded mainnet address).
 // scrypt-ts hardcodes 1 sat/KB — miner-invisible. ARC requires >=100 sat/KB.
+// Also: broadcast via GorillaPool ARC (WOC's mempool is poisoned by the dead
+// 1-sat/KB chain) and only build on confirmed, unspent UTXOs.
+interface WocUtxoRow {
+    tx_hash: string
+    tx_pos: number
+    value: number
+    status: string
+    isSpentInMempoolTx: boolean
+}
+
 class FeeProvider extends DefaultProvider {
     async getFeePerKb(): Promise<number> {
         return 100
+    }
+
+    async sendRawTransaction(rawTxHex: string): Promise<string> {
+        const r = await fetch('https://arc.gorillapool.io/v1/tx', {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ rawTx: rawTxHex }),
+        })
+        const d = (await r.json()) as { txid?: string }
+        if (!r.ok || !d.txid) {
+            throw new Error('ARC broadcast failed: ' + JSON.stringify(d))
+        }
+        return d.txid
+    }
+
+    async listUnspent(address: AddressOption): Promise<UTXO[]> {
+        const r = await fetch(
+            `https://api.whatsonchain.com/v1/bsv/main/address/${address}/unspent/all`
+        )
+        const d = (await r.json()) as { result?: WocUtxoRow[] }
+        return (d.result || [])
+            .filter((u) => u.status === 'confirmed' && !u.isSpentInMempoolTx)
+            .map((u) => ({
+                txId: u.tx_hash,
+                outputIndex: u.tx_pos,
+                satoshis: u.value,
+                script: bsv.Script.buildPublicKeyHashOut(address).toHex(),
+            }))
     }
 }
 
