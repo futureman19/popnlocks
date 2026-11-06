@@ -47,12 +47,19 @@ const ownPKH = PubKeyHash(
 // The scaffold key lives in .env as a testnet WIF; rebuild the same secret as a
 // mainnet key. NOTE: bsv v2 fromBuffer/fromHex mis-derive the pubkey — use the
 // hex constructor (verified: matches the funded mainnet address).
+// scrypt-ts hardcodes 1 sat/KB — miner-invisible. ARC requires >=100 sat/KB.
+class FeeProvider extends DefaultProvider {
+    async getFeePerKb(): Promise<number> {
+        return 100
+    }
+}
+
 function mainnetSigner(): TestWallet {
     const hex = myPrivateKey.bn.toString('hex').padStart(64, '0')
     const priv = new bsv.PrivateKey(hex, bsv.Networks.mainnet)
     return new TestWallet(
         priv,
-        new DefaultProvider({ network: bsv.Networks.mainnet })
+        new FeeProvider({ network: bsv.Networks.mainnet })
     )
 }
 

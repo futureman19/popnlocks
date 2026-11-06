@@ -46,12 +46,19 @@ const ownPKH = PubKeyHash(
     )
 )
 
+// scrypt-ts hardcodes 1 sat/KB — miner-invisible. ARC requires >=100 sat/KB.
+class FeeProvider extends DefaultProvider {
+    async getFeePerKb(): Promise<number> {
+        return 100
+    }
+}
+
 function mainnetSigner(): TestWallet {
     const hex = myPrivateKey.bn.toString('hex').padStart(64, '0')
     const priv = new bsv.PrivateKey(hex, bsv.Networks.mainnet)
     return new TestWallet(
         priv,
-        new DefaultProvider({ network: bsv.Networks.mainnet })
+        new FeeProvider({ network: bsv.Networks.mainnet })
     )
 }
 
@@ -111,7 +118,7 @@ async function main() {
 
     // State after `completed` chunks is fully determined by the fixture.
     const lastIdx = completed * CHUNK - 1 // index into HEADERS
-    const market = new HashrateDerivative(
+    let market = new HashrateDerivative(
         toByteString(ANCHOR_TIP) as ByteString,
         STRIKE,
         ownPKH,
