@@ -61,25 +61,28 @@ both prevouts, verify the anchor/bits and obtain a fresh height. This library
 neither queries a node nor broadcasts; locally valid signatures do not establish
 that the supplied funding outputs exist or remain unspent.
 
-**Test-only geometry:** the current binding carries **16 post-anchor headers**,
-settles on **index 12 (the 13th header)**, and verifies chunks of 4. Three headers
-follow the endpoint. `quote.window` means total carried headers, **not** the
-endpoint position. YES means endpoint target <= strike target. These are not
-production daily/weekly markets.
+**POP-1 daily geometry:** the offer binding now uses `PopnlocksProductionMarket`:
+**144 post-anchor headers**, **48 per crank**, endpoint **index 143 (the final header)**.
+YES means endpoint target <= strike target. Each crank deducts its bounty from
+the pot; the winner receives `pot - 3*bounty`. Fees are paid by the locksmith
+from separate inputs. Weekly windows remain unsupported. POP-0 and its original
+eight tests retain the separate 16-header/4-chunk contract unchanged.
 
 `src/offers/marketContract.ts` binds the local class and artifact name. The
 supported window, chunk and endpoint are derived from that class's constants;
-a quote cannot choose another contract or override its geometry. WO-4 must bind
-its reviewed production class/artifact there; geometry then follows automatically
-without numeric allowlist or match-transaction changes. Merely placing a second
-artifact on disk does not enable it. Rebuild class and artifact together with
+a quote cannot choose another contract or override its geometry. Both artifacts
+are built by the standard compile command. Rebuild class and artifact together with
 `npm test` before use; never substitute untrusted or stale compiled artifacts.
 
 ## On-chain
 
 ```sh
 npx ts-node scripts/onchain-demo.ts           # deploy + settle a retro market (needs funded .env key)
-npx ts-node scripts/resume.ts <cranks> <txid> # resume a ladder from its tip UTXO after mempool-depth limits
+npx ts-node scripts/locksmith.ts scripts/watchlist.example.json --dry-run # GET-only mainnet smoke
+npx ts-node scripts/resume.ts watchlist.json --dry-run # same parameterized engine
 ```
+
+See [locksmith operations and recovery](docs/locksmith.md) before enabling any
+network writes. No production POP-1 broadcast is claimed by the local tests.
 
 Mainnet notes baked into the spec: ≥100 sat/KB (scrypt-ts default is miner-invisible), broadcast via ARC, keep unconfirmed ladders ≤3 links.

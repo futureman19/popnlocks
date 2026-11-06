@@ -29,9 +29,8 @@
  * caller-supplied currentHeight — this module never touches the network:
  * - quote not expired (currentHeight < expiryHeight);
  * - anchor buried >= MIN_ANCHOR_CONFIRMATIONS (POP-1 §2 anchor rule);
- * - market.window in SUPPORTED_WINDOWS, fail-closed. Only 16 today: the
- *   test geometry of src/contracts/popnlocksMarket.ts (TOTAL=16). WO-4's
- *   production artifact extends the set; do not add unsupported values.
+ * - market.window in SUPPORTED_WINDOWS, fail-closed: production daily 144.
+ *   All three positive crank bounties must leave a positive winner payout.
  */
 
 import { MARKET_GEOMETRY } from './marketContract'
@@ -72,8 +71,7 @@ export interface Quote {
 
 /**
  * Window values (total post-anchor headers) this library can deploy.
- * Fail-closed: anything else is rejected. 16 is the test geometry of the
- * protected covenant (TOTAL=16); production windows arrive with WO-4.
+ * Fail-closed: daily production only; neither legacy 16 nor weekly 1008.
  */
 export const SUPPORTED_WINDOWS: readonly number[] = Object.freeze([
     MARKET_GEOMETRY.total,
@@ -244,11 +242,11 @@ export function parseQuote(raw: unknown): Quote {
             )
         }
 
-        if (isSats(m.bounty, 0)) {
+        if (isSats(m.bounty, 1)) {
             bounty = m.bounty
         } else {
             issues.push(
-                `market.bounty must be an integer of 0..${MAX_SATS} sats`
+                `market.bounty must be an integer of 1..${MAX_SATS} sats`
             )
         }
     }
@@ -257,10 +255,11 @@ export function parseQuote(raw: unknown): Quote {
         makerStake !== undefined &&
         takerStake !== undefined &&
         bounty !== undefined &&
-        bounty >= makerStake + takerStake
+        bounty * (MARKET_GEOMETRY.total / MARKET_GEOMETRY.chunk) >=
+            makerStake + takerStake
     ) {
         issues.push(
-            'market.bounty must be less than the pot ' +
+            'market.bounty for all cranks must be less than the pot ' +
                 '(makerStake + takerStake)'
         )
     }

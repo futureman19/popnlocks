@@ -13,7 +13,7 @@ import * as fs from 'fs'
 import * as path from 'path'
 import { bsv } from 'scrypt-ts'
 import { randomPrivateKey } from './utils/txHelper'
-import { PopnlocksMarket } from '../src/contracts/popnlocksMarket'
+import { PopnlocksProductionMarket as PopnlocksMarket } from '../src/contracts/popnlocksProductionMarket'
 import { MARKET_GEOMETRY } from '../src/offers/marketContract'
 import {
     Quote,
@@ -69,7 +69,7 @@ function makeQuote(makerSide: 'yes' | 'no' = 'yes'): Quote {
             anchorHeight: ANCHOR_HEIGHT,
             anchorTipHex: ANCHOR_TIP_HEX,
             anchorBits: ANCHOR_BITS,
-            window: 16, // the one SUPPORTED_WINDOWS entry (test geometry)
+            window: 144, // production daily geometry
             strikeTarget: STRIKE_TARGET,
             bounty: BOUNTY,
         },
@@ -449,17 +449,17 @@ describe('POP-1 §2 offer/match: deploy tx flow', () => {
 })
 
 describe('POP-1 §2 offer/match: quote schema', () => {
-    it('derives all geometry from the bound contract, including its non-final endpoint', () => {
+    it('derives all geometry from the bound contract, including its final endpoint', () => {
         expect(MARKET_GEOMETRY).to.deep.equal({
             total: Number(PopnlocksMarket.TOTAL),
             chunk: Number(PopnlocksMarket.CHUNK),
             endpointIndex: Number(PopnlocksMarket.ENDPOINT_IDX),
         })
-        // Frozen legacy fixture semantics, not production geometry.
+        // Production daily geometry; POP-0 tests retain their separate class.
         expect(MARKET_GEOMETRY).to.deep.equal({
-            total: 16,
-            chunk: 4,
-            endpointIndex: 12,
+            total: 144,
+            chunk: 48,
+            endpointIndex: 143,
         })
     })
 
@@ -471,12 +471,20 @@ describe('POP-1 §2 offer/match: quote schema', () => {
 
         const badWindow: Quote = {
             ...quote,
-            market: { ...quote.market, window: 144 },
+            market: { ...quote.market, window: 16 },
         }
         expect(() => validateQuote(badWindow, CURRENT_HEIGHT)).to.throw(
             QuoteValidationError,
             /unsupported window/
         )
+    })
+
+    it('rejects zero bounty and a pot exhausted by three production cranks', () => {
+        for (const bounty of [0, 7000]) {
+            const q = makeQuote()
+            q.market.bounty = bounty
+            expect(() => parseQuote(q)).to.throw(QuoteValidationError, /bounty/)
+        }
     })
 
     it('parseQuote rejects malformed records and reports every issue', () => {

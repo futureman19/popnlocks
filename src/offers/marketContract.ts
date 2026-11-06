@@ -1,4 +1,4 @@
-import { PopnlocksMarket } from '../contracts/popnlocksMarket'
+import { PopnlocksProductionMarket as PopnlocksMarket } from '../contracts/popnlocksProductionMarket'
 
 /**
  * Local deployment binding. WO-4 owns switching this binding and its artifact
@@ -7,12 +7,11 @@ import { PopnlocksMarket } from '../contracts/popnlocksMarket'
  * or numeric window allowlist needs changing with that binding.
  */
 export const MarketContract = PopnlocksMarket
-export const MARKET_ARTIFACT_NAME = 'popnlocksMarket.json'
+export const MARKET_ARTIFACT_NAME = 'popnlocksProductionMarket.json'
 
 /**
  * Artifact/class-defined geometry, not a promise that the endpoint is final.
- * Legacy test-only binding: 16 total headers, index 12 (13th header) endpoint,
- * chunks of 4; three headers follow the endpoint. No production tenor labels.
+ * Daily production binding: 144 headers, final index 143, chunks of 48.
  */
 export const MARKET_GEOMETRY = Object.freeze({
     total: Number(MarketContract.TOTAL),

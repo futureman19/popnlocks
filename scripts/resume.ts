@@ -1,258 +1,147 @@
-/*
- * Resume the on-chain settlement ladder after mempool-chain-depth limits.
- *
- *   npx ts-node scripts/resume.ts <completedCranks> <tipTxid>
- *
- * Rebuilds the contract instance at the state after <completedCranks> chunks
- * (all state is deterministic from the fixture), points it at the existing
- * on-chain UTXO <tipTxid>:0, and continues cranking to final settlement.
- */
-import { PopnlocksMarket } from '../src/contracts/popnlocksMarket'
-import { myPrivateKey } from '../tests/utils/privateKey'
-import {
-    ByteString,
-    DefaultProvider,
-    FixedArray,
-    MethodCallOptions,
-    PubKeyHash,
-    TestWallet,
-    Utils,
-    bsv,
-    toByteString,
-} from 'scrypt-ts'
-import type { AddressOption, UTXO } from 'scrypt-ts/dist/bsv/types'
+/* Parameterized shared recovery; no demo key or fixture imports. */
 import { createHash } from 'crypto'
-import * as fs from 'fs'
-import * as path from 'path'
-
-const fixture = JSON.parse(
-    fs.readFileSync(
-        path.join(__dirname, '..', 'tests', 'fixtures', 'headers.json'),
-        'utf8'
-    )
-)
-const ANCHOR_TIP: string = fixture.anchor_internal_hex
-const ANCHOR_BITS: bigint = BigInt(fixture.all_bits[0])
-const HEADERS: string[] = fixture.headers.slice(1) // 16 headers after anchor
-const CHUNK = 4
-const BOUNTY = 100n
-const POT = 1000
-const STRIKE = BigInt(fixture.endpoint_target) // YES wins
-
-const ownPKH = PubKeyHash(
-    toByteString(
-        bsv.crypto.Hash.sha256ripemd160(
-            myPrivateKey.publicKey.toBuffer()
-        ).toString('hex')
-    )
-)
-
-// scrypt-ts hardcodes 1 sat/KB — miner-invisible. ARC requires >=100 sat/KB.
-// Also: broadcast via GorillaPool ARC (WOC's mempool is poisoned by the dead
-// 1-sat/KB chain) and only build on confirmed, unspent UTXOs.
-interface WocUtxoRow {
-    tx_hash: string
-    tx_pos: number
-    value: number
-    status: string
-    isSpentInMempoolTx: boolean
-}
-
-class FeeProvider extends DefaultProvider {
-    async getFeePerKb(): Promise<number> {
-        return 100
-    }
-
-    async sendRawTransaction(rawTxHex: string): Promise<string> {
-        const r = await fetch('https://arc.gorillapool.io/v1/tx', {
-            method: 'POST',
-            headers: { 'content-type': 'application/json' },
-            body: JSON.stringify({ rawTx: rawTxHex }),
-        })
-        const d = (await r.json()) as { txid?: string }
-        if (!r.ok || !d.txid) {
-            throw new Error('ARC broadcast failed: ' + JSON.stringify(d))
-        }
-        return d.txid
-    }
-
-    async listUnspent(address: AddressOption): Promise<UTXO[]> {
-        const r = await fetch(
-            `https://api.whatsonchain.com/v1/bsv/main/address/${address}/unspent/all`
-        )
-        const d = (await r.json()) as { result?: WocUtxoRow[] }
-        return (d.result || [])
-            .filter((u) => u.status === 'confirmed' && !u.isSpentInMempoolTx)
-            .map((u) => ({
-                txId: u.tx_hash,
-                outputIndex: u.tx_pos,
-                satoshis: u.value,
-                script: bsv.Script.buildPublicKeyHashOut(address).toHex(),
-            }))
-    }
-}
-
-function mainnetSigner(): TestWallet {
-    const hex = myPrivateKey.bn.toString('hex').padStart(64, '0')
-    const priv = new bsv.PrivateKey(hex, bsv.Networks.mainnet)
-    return new TestWallet(
-        priv,
-        new FeeProvider({ network: bsv.Networks.mainnet })
-    )
-}
-
-function sha256dHex(hex: string): string {
-    const h1 = createHash('sha256').update(Buffer.from(hex, 'hex')).digest()
-    return createHash('sha256').update(h1).digest('hex')
-}
-
-function bitsToTarget(bits: bigint): bigint {
-    const exponent = bits / 16777216n // 2^24
-    const mantissa = bits % 8388608n // 2^23
-    let target = mantissa
-    for (let i = 0; i < 32; i++) {
-        if (16777216n * 2n ** BigInt(i) === 2n ** (exponent - 3n + 24n)) {
-            break
-        }
-        target *= 256n
-    }
-    return target
-}
-
-function targetOfHeader(headerHex: string): bigint {
-    const bitsLE = Buffer.from(headerHex, 'hex').subarray(72, 76)
-    return bitsToTarget(
-        BigInt('0x' + Buffer.from(bitsLE).reverse().toString('hex'))
-    )
-}
-
-async function withRetry<T>(fn: () => Promise<T>, label: string): Promise<T> {
-    for (let attempt = 1; attempt <= 8; attempt++) {
-        try {
-            return await fn()
-        } catch (e) {
-            const msg = e instanceof Error ? e.message : String(e)
-            if (msg.includes('429') && attempt < 8) {
-                console.log(
-                    `${label}: rate-limited, waiting 65s (attempt ${attempt}/8)`
-                )
-                await new Promise((r) => setTimeout(r, 65000))
-                continue
-            }
-            throw e
-        }
-    }
-    throw new Error('unreachable')
-}
-
-async function main() {
-    const completed = Number(process.argv[2])
-    const tipTxid = process.argv[3]
-    if (!Number.isInteger(completed) || completed < 0 || !tipTxid) {
-        throw new Error('usage: resume.ts <completedCranks> <tipTxid>')
-    }
-    await PopnlocksMarket.loadArtifact()
-    const signer = mainnetSigner()
-    console.log('resume from crank', completed, '| tip', tipTxid)
-
-    // State after `completed` chunks is fully determined by the fixture.
-    const lastIdx = completed * CHUNK - 1 // index into HEADERS
-    let market = new PopnlocksMarket(
-        toByteString(ANCHOR_TIP) as ByteString,
-        STRIKE,
-        ownPKH,
-        ownPKH,
-        BOUNTY,
-        ANCHOR_BITS,
-        completed === 0
-            ? (toByteString(ANCHOR_TIP) as ByteString)
-            : (toByteString(sha256dHex(HEADERS[lastIdx])) as ByteString),
-        BigInt(completed * CHUNK),
-        0n, // endpoint not reached before chunk 3 in the demo geometry
-        completed === 0
-            ? bitsToTarget(ANCHOR_BITS)
-            : targetOfHeader(HEADERS[lastIdx])
-    )
-    await market.connect(signer)
-    if (completed > 0) {
-        market.from = {
-            txId: tipTxid,
-            outputIndex: 0,
-            script: market.lockingScript.toHex(),
-            satoshis: POT,
-        }
-    }
-
-    for (let c = completed; c < HEADERS.length / CHUNK; c++) {
-        const hexes = HEADERS.slice(c * CHUNK, c * CHUNK + CHUNK)
-        const chunk = hexes.map((h) => toByteString(h)) as FixedArray<
-            ByteString,
-            4
-        >
-        const isFinal = c === HEADERS.length / CHUNK - 1
-
-        if (!isFinal) {
-            const next = market.next()
-            next.tipHash = toByteString(sha256dHex(hexes[CHUNK - 1]))
-            next.headersSeen = BigInt((c + 1) * CHUNK)
-            next.endpointTarget = market.endpointTarget
-            next.prevTarget = targetOfHeader(hexes[CHUNK - 1])
-            const res = await withRetry(
-                () =>
-                    market.methods.settle(chunk, ownPKH, {
-                        next: { instance: next, balance: POT },
-                    } as MethodCallOptions<PopnlocksMarket>),
-                `crank ${c + 1}`
-            )
-            console.log(`crank ${c + 1}:`, res.tx.id)
-            market = next
-        } else {
-            market.bindTxBuilder('settle', async (current, options) => {
-                const tx = new bsv.Transaction().addInput(
-                    current.buildContractInput(options.fromUTXO)
-                )
-                tx.addOutput(
-                    new bsv.Transaction.Output({
-                        script: bsv.Script.fromHex(
-                            Utils.buildPublicKeyHashScript(ownPKH)
-                        ),
-                        satoshis: POT - Number(BOUNTY),
-                    })
-                )
-                tx.addOutput(
-                    new bsv.Transaction.Output({
-                        script: bsv.Script.fromHex(
-                            Utils.buildPublicKeyHashScript(ownPKH)
-                        ),
-                        satoshis: Number(BOUNTY),
-                    })
-                )
-                tx.change(
-                    options.changeAddress ||
-                        (await current.signer.getDefaultAddress())
-                )
-                return Promise.resolve({
-                    tx,
-                    atInputIndex: 0,
-                    nexts: undefined,
-                })
-            })
-            const res = await withRetry(
-                () => market.methods.settle(chunk, ownPKH),
-                'settle'
-            )
-            console.log('settle (final):', res.tx.id)
-            console.log(
-                'SETTLED: YES side paid',
-                POT - Number(BOUNTY),
-                'sats; bounty',
-                Number(BOUNTY)
-            )
-        }
-    }
-}
-
-main().catch((e) => {
-    console.error('RESUME FAILED:', e)
-    process.exit(1)
+import {
+    existsSync,
+    mkdirSync,
+    readFileSync,
+    renameSync,
+    writeFileSync,
+} from 'fs'
+import { dirname } from 'path'
+export const GEOMETRY = Object.freeze({
+    total: 144,
+    chunk: 48,
+    endpointIndex: 143,
 })
+export function digest(header: string): string {
+    return createHash('sha256')
+        .update(
+            createHash('sha256').update(Buffer.from(header, 'hex')).digest()
+        )
+        .digest('hex')
+}
+export function targetFromBits(bits: bigint): bigint {
+    const exponent = bits >> 24n
+    const mantissa = bits & 0x7fffffn
+    if (
+        bits < 1n ||
+        bits > 0xffffffffn ||
+        (bits & 0x800000n) !== 0n ||
+        exponent < 3n ||
+        exponent > 32n ||
+        mantissa === 0n
+    )
+        throw new Error('invalid compact bits')
+    return mantissa * 256n ** (exponent - 3n)
+}
+export function headerTarget(header: string): bigint {
+    if (!/^[0-9a-f]{160}$/.test(header)) throw new Error('invalid header')
+    return targetFromBits(BigInt(Buffer.from(header, 'hex').readUInt32LE(72)))
+}
+export function rebuildState(
+    anchor: string,
+    anchorBits: bigint,
+    headers: string[],
+    completed: number,
+    geometry = GEOMETRY
+) {
+    if (
+        !Number.isInteger(completed) ||
+        completed < 0 ||
+        completed > geometry.total / geometry.chunk
+    )
+        throw new Error('invalid rung')
+    if (!/^[0-9a-f]{64}$/.test(anchor)) throw new Error('invalid anchor')
+    const seen = completed * geometry.chunk
+    if (headers.length < seen) throw new Error('insufficient headers')
+    let tipHash = anchor
+    let prevTarget = targetFromBits(anchorBits)
+    const anchorTarget = prevTarget
+    let endpointTarget = 0n
+    for (let i = 0; i < seen; i++) {
+        const h = headers[i]
+        const target = headerTarget(h)
+        if (h.slice(8, 72) !== tipHash) throw new Error('broken header linkage')
+        tipHash = digest(h)
+        if (
+            BigInt(
+                '0x' + Buffer.from(tipHash, 'hex').reverse().toString('hex')
+            ) >= target
+        )
+            throw new Error('insufficient PoW')
+        if (target > anchorTarget * 8n)
+            throw new Error('difficulty floor breached')
+        if (target * 20n < prevTarget * 19n || target * 20n > prevTarget * 21n)
+            throw new Error('bits drift bound exceeded')
+        prevTarget = target
+        if (i === geometry.endpointIndex) endpointTarget = target
+    }
+    return { tipHash, headersSeen: BigInt(seen), endpointTarget, prevTarget }
+}
+export interface ResumeHooks {
+    rebuild(completed: number): Promise<void>
+    crank(completed: number): Promise<string>
+    waitConfirmed(txid: string): Promise<void>
+    save(txids: string[]): Promise<void>
+}
+/** Explicit depth rejection only; unknown outcomes halt for reconciliation. */
+export async function resumeLadder(
+    txids: string[],
+    hooks: ResumeHooks,
+    totalCranks = 3
+) {
+    if (txids.length < 1 || txids.length > totalCranks + 1)
+        throw new Error('invalid checkpoint')
+    let retries = 0
+    while (txids.length <= totalCranks) {
+        const completed = txids.length - 1
+        await hooks.rebuild(completed)
+        let id: string
+        try {
+            id = await hooks.crank(completed)
+        } catch (e) {
+            if (!String(e).includes('too-long-mempool-chain') || retries++ >= 3)
+                throw e
+            await hooks.waitConfirmed(txids[completed])
+            continue
+        }
+        if (!/^[0-9a-f]{64}$/.test(id)) throw new Error('invalid returned txid')
+        txids.push(id)
+        await hooks.save(txids)
+        retries = 0
+    }
+}
+export function atomicJson(file: string, value: unknown) {
+    mkdirSync(dirname(file), { recursive: true })
+    const temp = file + '.tmp'
+    writeFileSync(temp, JSON.stringify(value, null, 2) + '\n', { mode: 0o600 })
+    renameSync(temp, file)
+}
+export interface SettlementRecord {
+    marketId: string
+    market: object
+    txids: string[]
+    winnerSide: 'yes' | 'no'
+}
+/** Single writer; malformed/conflicting existing data fails closed. */
+export function appendSettlement(file: string, record: SettlementRecord) {
+    const records = existsSync(file)
+        ? JSON.parse(readFileSync(file, 'utf8'))
+        : []
+    if (!Array.isArray(records)) throw new Error('pops.json must be an array')
+    const existing = records.find((r) => r.marketId === record.marketId)
+    if (existing) {
+        if (JSON.stringify(existing) !== JSON.stringify(record))
+            throw new Error('conflicting settlement record')
+        return
+    }
+    atomicJson(file, [...records, record])
+}
+if (require.main === module) {
+    import('./locksmith')
+        .then(({ main }) => main())
+        .catch((e) => {
+            console.error(String(e))
+            process.exitCode = 1
+        })
+}

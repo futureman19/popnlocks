@@ -282,7 +282,7 @@ export function compileMarketLockingScriptHex(
         0n, // endpointTarget
         bitsToTarget(anchorBits) // drift base starts at the anchor's target
     )
-    return instance.lockingScript.toHex()
+    return instance.markAsGenesis().lockingScript.toHex()
 }
 
 /**
