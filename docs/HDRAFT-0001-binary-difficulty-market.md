@@ -14,6 +14,7 @@ endpoint target, YES paid 900 sats + 100 sat crank bounty, all in-covenant):**
 deploy `ca36664a82e3b973b9307e2fc60f5e12fcb5b62ce2874257c4c25e10a28145ea` →
 cranks `9d241d08…820b132355`, `03c29d96…a658fad2`, `d87e2ce8…c3ccc5df55` →
 settle `92c3d27c1e258c751f14de99b57bc77302fd324df3748b15be4157ad2f54b3d8`.
+All five mined in block **974267** (status via `arc.gorillapool.io/v1/tx/<txid>`).
 Ops notes: scrypt-ts default fee (1 sat/KB) is miner-invisible — use ≥100 sat/KB;
 broadcast via ARC (arc.gorillapool.io/v1/tx) rather than WOC; expect
 `too-long-mempool-chain` beyond ~3 unconfirmed links — resume from the tip UTXO
