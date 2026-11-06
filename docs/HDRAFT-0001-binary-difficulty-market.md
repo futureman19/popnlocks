@@ -1,6 +1,6 @@
 # HDRAFT-0001: Binary Difficulty Markets (Self-Settling Hashrate Derivative)
 
-**Status: DRAFT — core primitive + chunked settlement ladder PoC-verified.**
+**Status: DRAFT — core primitive + chunked settlement ladder PoC-verified; mainnet end-to-end run executed 2026-11-06.**
 Validated (2026-11-05, sCrypt 1.4.5 local VM): in-script verification of 17 real BSV
 mainnet headers (anchor 830000) — linkage, sha256d-vs-bits PoW, bits2target expansion,
 endpoint strike comparison. Settlement runs as a stateful ladder (4 cranks × 4 headers
@@ -8,7 +8,18 @@ in test geometry; production: chunks of 144): continuation outputs carry
 tipHash/headersSeen/endpointTarget, final crank pays winner + bounty. Negative tests
 green: tampered mid-ladder header, wrong-winner payout builder, skip-ahead linkage
 break. 5/5 tests green.
-Pending: DAA-consistency check (§4), fee/bounty calibration, testnet run.
+
+**Mainnet evidence (2026-11-06, retro market on window 830001–830016, strike = real
+endpoint target, YES paid 900 sats + 100 sat crank bounty, all in-covenant):**
+deploy `ca36664a82e3b973b9307e2fc60f5e12fcb5b62ce2874257c4c25e10a28145ea` →
+cranks `9d241d08…820b132355`, `03c29d96…a658fad2`, `d87e2ce8…c3ccc5df55` →
+settle `92c3d27c1e258c751f14de99b57bc77302fd324df3748b15be4157ad2f54b3d8`.
+Ops notes: scrypt-ts default fee (1 sat/KB) is miner-invisible — use ≥100 sat/KB;
+broadcast via ARC (arc.gorillapool.io/v1/tx) rather than WOC; expect
+`too-long-mempool-chain` beyond ~3 unconfirmed links — resume from the tip UTXO
+(`scripts/resume.ts`).
+
+Pending: fee/bounty calibration for production geometry (W=2016+M).
 
 ## 1. Concept
 
