@@ -25,8 +25,55 @@ POP-0 (binary difficulty market) — mainnet end-to-end run executed 2026-11-06:
 
 ```sh
 npm install
-npm test          # 8/8 — golden header chain + synthetic attack chains
+npm test          # golden headers, synthetic attacks, offline offer/match tests
 ```
+
+## Offline POP-1 offer/match library
+
+`src/offers/quoteSchema.ts` validates quote records without network access.
+`src/offers/matchTx.ts` builds and signs an atomic two-input deployment:
+
+```ts
+const tx = buildDeployTx(
+  quote,
+  makerUtxo,
+  takerUtxo,
+  takerPKH,
+  feeRate,
+  currentHeight
+);
+const halfSignedHex = makerSign(tx, makerKey, 0);
+const finalHex = takerComplete(halfSignedHex, takerKey, {
+  acceptedQuote: quote,
+  makerPrevouts: [makerUtxo],
+  takerPrevouts: [takerUtxo],
+  feeRate,
+  currentHeight,
+});
+```
+
+Fee rate is integer sat/KB. v1 accepts exactly one P2PKH prevout per party,
+requires non-dust change for both, and returns raw transaction hex (no cache or
+envelope). Before taker signing, it checks the exact covenant bytes from a fresh
+local artifact instantiation, pot, outpoints, both changes, and maker ALL|FORKID
+signature. Callers must independently authenticate the accepted quote, resolve
+both prevouts, verify the anchor/bits and obtain a fresh height. This library
+neither queries a node nor broadcasts; locally valid signatures do not establish
+that the supplied funding outputs exist or remain unspent.
+
+**Test-only geometry:** the current binding carries **16 post-anchor headers**,
+settles on **index 12 (the 13th header)**, and verifies chunks of 4. Three headers
+follow the endpoint. `quote.window` means total carried headers, **not** the
+endpoint position. YES means endpoint target <= strike target. These are not
+production daily/weekly markets.
+
+`src/offers/marketContract.ts` binds the local class and artifact name. The
+supported window, chunk and endpoint are derived from that class's constants;
+a quote cannot choose another contract or override its geometry. WO-4 must bind
+its reviewed production class/artifact there; geometry then follows automatically
+without numeric allowlist or match-transaction changes. Merely placing a second
+artifact on disk does not enable it. Rebuild class and artifact together with
+`npm test` before use; never substitute untrusted or stale compiled artifacts.
 
 ## On-chain
 
