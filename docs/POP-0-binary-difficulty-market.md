@@ -1,4 +1,6 @@
-# HDRAFT-0001: Binary Difficulty Markets (Self-Settling Hashrate Derivative)
+# POP-0: Binary Difficulty Markets
+
+**popnlocks** — pop nLocks. The chain attests to its own vital signs; the winner pops the lock.
 
 **Status: DRAFT — core primitive + chunked settlement ladder PoC-verified; mainnet end-to-end run executed 2026-11-06.**
 Validated (2026-11-05, sCrypt 1.4.5 local VM): in-script verification of 17 real BSV

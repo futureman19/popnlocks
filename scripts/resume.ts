@@ -7,7 +7,7 @@
  * (all state is deterministic from the fixture), points it at the existing
  * on-chain UTXO <tipTxid>:0, and continues cranking to final settlement.
  */
-import { HashrateDerivative } from '../src/contracts/hashrateDerivative'
+import { PopnlocksMarket } from '../src/contracts/popnlocksMarket'
 import { myPrivateKey } from '../tests/utils/privateKey'
 import {
     ByteString,
@@ -151,13 +151,13 @@ async function main() {
     if (!Number.isInteger(completed) || completed < 0 || !tipTxid) {
         throw new Error('usage: resume.ts <completedCranks> <tipTxid>')
     }
-    await HashrateDerivative.loadArtifact()
+    await PopnlocksMarket.loadArtifact()
     const signer = mainnetSigner()
     console.log('resume from crank', completed, '| tip', tipTxid)
 
     // State after `completed` chunks is fully determined by the fixture.
     const lastIdx = completed * CHUNK - 1 // index into HEADERS
-    let market = new HashrateDerivative(
+    let market = new PopnlocksMarket(
         toByteString(ANCHOR_TIP) as ByteString,
         STRIKE,
         ownPKH,
@@ -201,7 +201,7 @@ async function main() {
                 () =>
                     market.methods.settle(chunk, ownPKH, {
                         next: { instance: next, balance: POT },
-                    } as MethodCallOptions<HashrateDerivative>),
+                    } as MethodCallOptions<PopnlocksMarket>),
                 `crank ${c + 1}`
             )
             console.log(`crank ${c + 1}:`, res.tx.id)

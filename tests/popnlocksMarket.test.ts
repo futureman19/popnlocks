@@ -1,5 +1,5 @@
 import { expect, use } from 'chai'
-import { HashrateDerivative } from '../src/contracts/hashrateDerivative'
+import { PopnlocksMarket } from '../src/contracts/popnlocksMarket'
 import { getDefaultSigner } from './utils/txHelper'
 import {
     ByteString,
@@ -79,8 +79,8 @@ function targetOfHeader(headerHex: string): bigint {
 // covenants bind a custom builder that adds the winner + bounty outputs.
 function settleTxBuilder(winnerPKH: PubKeyHash, winnerAmt: bigint) {
     return async (
-        current: HashrateDerivative,
-        options: MethodCallOptions<HashrateDerivative>
+        current: PopnlocksMarket,
+        options: MethodCallOptions<PopnlocksMarket>
     ): Promise<{
         tx: bsv.Transaction
         atInputIndex: number
@@ -117,7 +117,7 @@ async function deployMarket(
     anchorTip: string,
     anchorBits: bigint
 ) {
-    const market = new HashrateDerivative(
+    const market = new PopnlocksMarket(
         toByteString(anchorTip) as ByteString,
         strikeTarget,
         YES_PKH,
@@ -161,7 +161,7 @@ async function runLadder(
             next.prevTarget = targetOfHeader(hexes[CHUNK - 1])
             await current.methods.settle(chunk, CRANK_PKH, {
                 next: { instance: next, balance: POT },
-            } as MethodCallOptions<HashrateDerivative>)
+            } as MethodCallOptions<PopnlocksMarket>)
             current = next
         } else {
             let winner =
@@ -178,9 +178,9 @@ async function runLadder(
     }
 }
 
-describe('HDRAFT-0001 PoC: Binary Difficulty Market — chunked ladder', () => {
+describe('POP-0 PoC: Binary Difficulty Market — chunked ladder', () => {
     before(async () => {
-        await HashrateDerivative.loadArtifact()
+        await PopnlocksMarket.loadArtifact()
     })
 
     it('settles YES through 4 cranks when strike equals the real endpoint target', async () => {
@@ -218,7 +218,7 @@ describe('HDRAFT-0001 PoC: Binary Difficulty Market — chunked ladder', () => {
         const call = async () =>
             market.methods.settle(chunk, CRANK_PKH, {
                 next: { instance: next, balance: POT },
-            } as MethodCallOptions<HashrateDerivative>)
+            } as MethodCallOptions<PopnlocksMarket>)
         await expect(call()).to.be.rejected
     })
 

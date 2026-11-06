@@ -13,7 +13,7 @@ import {
 } from 'scrypt-ts'
 
 /*
- * HDRAFT-0001 PoC — Binary Difficulty Market, chunked settlement ladder.
+ * POP-0 PoC — Binary Difficulty Market, chunked settlement ladder.
  *
  * YES/NO collateral locked at deploy. Settlement is anyone-callable and runs
  * as a ladder: each crank verifies a chunk of CHUNK headers (linkage +
@@ -25,7 +25,7 @@ import {
  * chunks of 4. Production geometry per spec §3.3: W=2016+M, chunks of 144 —
  * identical code path, larger FixedArray.
  */
-export class HashrateDerivative extends SmartContract {
+export class PopnlocksMarket extends SmartContract {
     // Internal byte order (raw sha256d digest order) of the anchor block hash.
     @prop()
     anchorTip: ByteString
@@ -115,12 +115,12 @@ export class HashrateDerivative extends SmartContract {
     public settle(headers: FixedArray<ByteString, 4>, crankPKH: PubKeyHash) {
         let prev: ByteString = this.tipHash
         let endpointTarget: bigint = this.endpointTarget
-        const anchorTarget: bigint = HashrateDerivative.bits2target(
+        const anchorTarget: bigint = PopnlocksMarket.bits2target(
             this.anchorBits
         )
         let prevTarget: bigint = this.prevTarget
 
-        for (let i: bigint = 0n; i < HashrateDerivative.CHUNK; i++) {
+        for (let i: bigint = 0n; i < PopnlocksMarket.CHUNK; i++) {
             const header: ByteString = headers[Number(i)]
 
             // 1. Linkage: this header's prevHash must equal the previous digest.
@@ -129,13 +129,13 @@ export class HashrateDerivative extends SmartContract {
             // 2. PoW: sha256d(header) interpreted as little-endian uint256
             //    must be below the target declared by this header's own bits.
             const bits: bigint = Utils.fromLEUnsigned(slice(header, 72n, 76n))
-            const target: bigint = HashrateDerivative.bits2target(bits)
+            const target: bigint = PopnlocksMarket.bits2target(bits)
             const digest: ByteString = hash256(header)
             assert(Utils.fromLEUnsigned(digest) < target, 'insufficient PoW')
 
             // 3. Lite DAA: floor first (anchor-relative), then drift bound.
             assert(
-                target <= anchorTarget * HashrateDerivative.FLOOR_FACTOR,
+                target <= anchorTarget * PopnlocksMarket.FLOOR_FACTOR,
                 'difficulty floor breached'
             )
             assert(
@@ -145,17 +145,17 @@ export class HashrateDerivative extends SmartContract {
             )
             prevTarget = target
 
-            if (this.headersSeen + i == HashrateDerivative.ENDPOINT_IDX) {
+            if (this.headersSeen + i == PopnlocksMarket.ENDPOINT_IDX) {
                 endpointTarget = target
             }
             prev = digest
         }
 
-        const seen: bigint = this.headersSeen + HashrateDerivative.CHUNK
+        const seen: bigint = this.headersSeen + PopnlocksMarket.CHUNK
         const balance: bigint = this.ctx.utxo.value
         let outputs: ByteString = toByteString('')
 
-        if (seen < HashrateDerivative.TOTAL) {
+        if (seen < PopnlocksMarket.TOTAL) {
             // Mid-ladder: carry state forward, pot preserved in full.
             this.tipHash = prev
             this.headersSeen = seen

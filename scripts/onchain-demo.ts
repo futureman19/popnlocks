@@ -1,10 +1,10 @@
 /*
- * On-chain demo: HDRAFT-0001 retro market on BSV mainnet.
+ * On-chain demo: POP-0 retro market on BSV mainnet.
  * Anchor = block 830000 (long buried) => the 16-header window already exists,
  * so the full ladder settles immediately. All payouts route back to the demo
  * key; total cost is fees only. Strike = real endpoint target => YES wins.
  */
-import { HashrateDerivative } from '../src/contracts/hashrateDerivative'
+import { PopnlocksMarket } from '../src/contracts/popnlocksMarket'
 import { myPrivateKey } from '../tests/utils/privateKey'
 import {
     ByteString,
@@ -140,7 +140,7 @@ async function withRetry<T>(fn: () => Promise<T>, label: string): Promise<T> {
 }
 
 async function main() {
-    await HashrateDerivative.loadArtifact()
+    await PopnlocksMarket.loadArtifact()
     const [signer, addr, bal] = await withRetry(async () => {
         const s = mainnetSigner()
         const b = await s.getBalance() // forces provider connect + UTXO fetch
@@ -149,7 +149,7 @@ async function main() {
     console.log('demo key mainnet address:', addr.toString())
     console.log('balance:', bal.confirmed, '+', bal.unconfirmed, 'unconfirmed')
 
-    let market = new HashrateDerivative(
+    let market = new PopnlocksMarket(
         toByteString(ANCHOR_TIP) as ByteString,
         ENDPOINT_TARGET, // strike == real endpoint target => YES wins
         ownPKH, // yesPKH
@@ -184,7 +184,7 @@ async function main() {
                 () =>
                     market.methods.settle(chunk, ownPKH, {
                         next: { instance: next, balance: POT },
-                    } as MethodCallOptions<HashrateDerivative>),
+                    } as MethodCallOptions<PopnlocksMarket>),
                 `crank ${c + 1}`
             )
             console.log(`crank ${c + 1}:`, res.tx.id)
