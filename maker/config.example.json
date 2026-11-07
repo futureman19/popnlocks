@@ -1,0 +1,14 @@
+{
+  "makerPKH": "0000000000000000000000000000000000000000",
+  "pot": 20000,
+  "bounty": 1500,
+  "maxMarketStake": 50000,
+  "maxDailyExposure": 200000,
+  "maxCoinSats": 25000,
+  "killfile": "STOP_MAKER",
+  "stateDir": "maker/state",
+  "host": "127.0.0.1",
+  "port": 8787,
+  "origin": "https://popnlocks.com",
+  "vaultCwd": "C:/Users/futur/Desktop/dogfood-wallet"
+}

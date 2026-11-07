@@ -12,3 +12,6 @@ tsconfig-scryptTS.json
 .locksmith-state/
 .locksmith.lock
 .locksmith-test-*/
+maker/state/
+STOP_MAKER
+maker/config.local.json
