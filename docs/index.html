@@ -745,7 +745,8 @@
         // Display-only parsing, NOT transaction/chain authentication.
         // No wallet, key entry, /take or broadcast path exists in this increment.
         const text = (id, value) => {
-          document.getElementById(id).textContent = value;
+          const node = document.getElementById(id);
+          if (node.textContent !== value) node.textContent = value;
         };
         const sats = (n) => n.toLocaleString("en-US");
         const positive = (n) => Number.isSafeInteger(n) && n > 0;
