@@ -35,6 +35,12 @@ Market exposure is aggregate maker stake per anchor. Daily cap is conservatively
 
 Sized-coin selection chooses the smallest unreserved coin covering stake + explicit fee share + 546-sat change, bounded by maxCoinSats. `/quotes` status exposes inventory in live mode only. A human prepares ordinary stake-sized funding coins using the vault's split operation; the bot never splits, sweeps, funds, or accesses keys. `NO_SIZED_COIN` calls for inventory maintenance. `VAULT_CAP` means resize coins or wait/reconcile the vault's daily limit, not retry blindly. Every ambiguous attempt retains exposure.
 
+## Vault transport
+
+Requires Dogfood `18de0be` or newer with `popnlocks-sign --stdin` support. The fixed command is `bun src/cli.ts popnlocks-sign --stdin 0`; transaction hex is piped as ASCII and stdin is closed immediately (EOF), never placed in argv. The maker rejects malformed or over-1,048,576-byte input before spawning. The vault independently caps stdin at the same size and requires EOF within 10 seconds; its policy/key/signing gates are unchanged. The maker retains the existing 120-second overall subprocess timeout, 2 MiB output bound, no-shell execution and conservative exposure hold on any failure. No legacy argv fallback: production Daily covenant hex exceeds Windows command-line capacity.
+
+The transport regression sends a real WO-1 production deploy through an **inert Node echo child**, verifies byte identity and bounded argv, and never invokes the vault. It also exercises the exact 1 MiB boundary, oversize refusal, child rejection and missing-executable errors.
+
 ## Verification
 
 `npm test` includes maker pricing, scheduler, exposure, killfile, dry-run, prevout, HTTP and offline disposable-signature tests. `npm run typecheck:maker` includes daemon and tests. No live signing/funding/broadcast is needed. The tests' random testnet keys are disposable local fixtures, never vault keys.

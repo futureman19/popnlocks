@@ -4,11 +4,23 @@ import { Config } from './service'
 export type Runner = (
     file: string,
     args: string[],
-    cwd: string
+    cwd: string,
+    stdin: string
 ) => Promise<{ stdout: string; stderr: string }>
-const execute: Runner = (file, args, cwd) =>
+// Matches Dogfood's supported stdin contract; hex is ASCII bytes, not argv.
+export const MAX_STDIN_BYTES = 1048576
+function validateInput(hex: string) {
+    if (
+        hex.length > MAX_STDIN_BYTES ||
+        hex.length % 2 ||
+        !/^[0-9a-f]+$/.test(hex)
+    )
+        throw new Error('INVALID_TRANSACTION')
+}
+export const execute: Runner = (file, args, cwd, stdin) =>
     new Promise((resolve, reject) => {
-        execFile(
+        validateInput(stdin)
+        const child = execFile(
             file,
             args,
             {
@@ -23,6 +35,12 @@ const execute: Runner = (file, args, cwd) =>
                 else resolve({ stdout, stderr })
             }
         )
+        // End sends EOF immediately; the vault additionally enforces its 10s read deadline.
+        child.stdin!.on('error', (error) => {
+            child.kill()
+            reject(error)
+        })
+        child.stdin!.end(stdin, 'ascii')
     })
 export function vaultSigner(
     config: Config,
@@ -34,14 +52,14 @@ export function vaultSigner(
     return async (hex: string): Promise<string> => {
         if (!enabled) throw new Error('DRY_RUN')
         if (existsSync(config.killfile)) throw new Error('STOPPED')
-        if (!/^(?:[0-9a-f]{2})+$/.test(hex))
-            throw new Error('INVALID_TRANSACTION')
+        validateInput(hex)
         let stdout: string
         try {
             const response = await run(
                 'bun',
-                ['src/cli.ts', 'popnlocks-sign', hex, '0'],
-                cwd
+                ['src/cli.ts', 'popnlocks-sign', '--stdin', '0'],
+                cwd,
+                hex
             )
             stdout = response.stdout
         } catch (e) {
