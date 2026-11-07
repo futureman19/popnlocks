@@ -4,12 +4,15 @@
 
 ## 1. Shape
 
-Two recurring flagship markets, always on schedule — scarcity concentrates liquidity:
+**v1 ships ONE flagship** — liquidity concentration beats coverage:
 
-| Market         | Window                | Cadence                            |
-| -------------- | --------------------- | ---------------------------------- |
-| **Daily Pop**  | 144 blocks (~1 day)   | starts daily, settles next day     |
-| **Weekly Pop** | 1008 blocks (~1 week) | starts Monday, settles next Monday |
+| Market        | Window              | Cadence                        |
+| ------------- | ------------------- | ------------------------------ |
+| **Daily Pop** | 144 blocks (~1 day) | starts daily, settles next day |
+
+Weekly Pop (1008 blocks) is deferred to POP-1.1 — it needs a second compiled
+artifact (1008-window geometry) and a SUPPORTED_WINDOWS addition; shipping two
+thin books is worse than one deep one at launch.
 
 Rationale: BSV's cw-144 DAA nudges difficulty ~1/144 per block; windows shorter than
 ~144 blocks resolve on noise. Daily is the floor. (Hourly/10-min markets were
@@ -56,9 +59,11 @@ Anchor rule (from POP-0 §risks): anchor block must have ≥6 confirmations at d
 
 ## 4. Maker pricing v1
 
-- Model: P(endpointTarget ≥ strike) estimated from trailing per-144-block drift,
-  log-normal approximation. v1 strike = anchor target ("will difficulty rise over
-  the window?") — a true coin-flip-shaped question, tightest possible spread case.
+- Model: P(YES) = P(endpointTarget ≤ strikeTarget) — i.e. difficulty at/above
+  strike at window end (the covenant's own condition; contract is authority).
+  Estimate from trailing per-144-block drift, log-normal approximation. v1
+  strike = anchor target ("will difficulty rise over the window?") — a true
+  coin-flip-shaped question, tightest possible spread case.
 - Quote both sides with a fixed house spread (start 8% wide).
 - Limits: max stake per market, max daily exposure, `STOP_MAKER` killfile honored
   within 30s. Default mode on first deploy: **dry-run** (quotes computed, no signing)
