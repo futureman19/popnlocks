@@ -1,0 +1,66 @@
+{
+  "results": [
+    {
+      "state": "live",
+      "status": "Maker quotes \u00b7 read-only",
+      "dom": "MARKETS \u00b7 POP-1\nWatch the next pop\n\nDaily difficulty. Two sides. One chain-settled outcome.\n\nLive maker quotes \u00b7 Daily Pop\n\nMaker quotes \u00b7 read-only\n\n144-block window \u00b7 YES wins when endpoint target is at or below the strike (difficulty at or above strike).\n\n134 blocks to close \u00b7 endpoint 1,008,144 \u00b7 about 1,340 minutes at 10 min/block (estimate, not a clock deadline).\n\nAnchor 1,008,000 \u00b7 strike target 123\n\nYES for sale\n5,201 sats\n\nYour stake \u00b7 maker stake 4,799 sats \u00b7 winner payout 9,697 sats after 303 sats in crank bounties \u00b7 quote expires at block 1,008,013 \u00b7 about 30 minutes from snapshot at 10 min/block (estimate).\n\nTake\nNO for sale\n5,802 sats\n\nYour stake \u00b7 maker stake 4,198 sats \u00b7 winner payout 9,697 sats after 303 sats in crank bounties \u00b7 quote expires at block 1,008,013 \u00b7 about 30 minutes from snapshot at 10 min/block (estimate).\n\nTake\n\nRead-only board. Taking is unavailable until wallet verification and signing are integrated.\n\nMaker snapshot 10:44:16 AM \u00b7 height 1,008,010. Refreshes every 20 seconds; not independently chain-verified.\n\nPrices are stakes in satoshis, not probabilities. Network fees are additional. Weekly Pop is deferred.\n\nRecent pops\n\nNo Daily pops recorded yet.",
+      "passed": true
+    },
+    {
+      "state": "dry-run",
+      "status": "Dry-run \u00b7 indicative only",
+      "dom": "MARKETS \u00b7 POP-1\nWatch the next pop\n\nDaily difficulty. Two sides. One chain-settled outcome.\n\nLive maker quotes \u00b7 Daily Pop\n\nDry-run \u00b7 indicative only\n\nDRY-RUN \u2014 quotes not takable\n\n144-block window \u00b7 YES wins when endpoint target is at or below the strike (difficulty at or above strike).\n\n134 blocks to close \u00b7 endpoint 1,008,144 \u00b7 about 1,340 minutes at 10 min/block (estimate, not a clock deadline).\n\nAnchor 1,008,000 \u00b7 strike target 123\n\nYES for sale\n5,201 sats\n\nYour stake \u00b7 maker stake 4,799 sats \u00b7 winner payout 9,697 sats after 303 sats in crank bounties \u00b7 quote expires at block 1,008,013 \u00b7 about 30 minutes from snapshot at 10 min/block (estimate).\n\nTake\nNO for sale\n5,802 sats\n\nYour stake \u00b7 maker stake 4,198 sats \u00b7 winner payout 9,697 sats after 303 sats in crank bounties \u00b7 quote expires at block 1,008,013 \u00b7 about 30 minutes from snapshot at 10 min/block (estimate).\n\nTake\n\nRead-only board. Taking is unavailable until wallet verification and signing are integrated.\n\nMaker snapshot 10:44:17 AM \u00b7 height 1,008,010. Refreshes every 20 seconds; not independently chain-verified.\n\nPrices are stakes in satoshis, not probabilities. Network fees are additional. Weekly Pop is deferred.\n\nRecent pops\n\nNo Daily pops recorded yet.",
+      "passed": true
+    },
+    {
+      "state": "stopped",
+      "status": "book stopped",
+      "dom": "MARKETS \u00b7 POP-1\nWatch the next pop\n\nDaily difficulty. Two sides. One chain-settled outcome.\n\nLive maker quotes \u00b7 Daily Pop\n\nbook stopped\n\n144-block window \u00b7 YES wins when endpoint target is at or below the strike (difficulty at or above strike).\n\nWindow details unavailable.\n\nYES for sale\n\u2014\n\nNo current quote.\n\nTake\nNO for sale\n\u2014\n\nNo current quote.\n\nTake\n\nRead-only board. Taking is unavailable until wallet verification and signing are integrated.\n\nThe maker has paused its book.\n\nPrices are stakes in satoshis, not probabilities. Network fees are additional. Weekly Pop is deferred.\n\nRecent pops\n\nNo Daily pops recorded yet.",
+      "passed": true
+    },
+    {
+      "state": "stale",
+      "status": "quotes stale",
+      "dom": "MARKETS \u00b7 POP-1\nWatch the next pop\n\nDaily difficulty. Two sides. One chain-settled outcome.\n\nLive maker quotes \u00b7 Daily Pop\n\nquotes stale\n\n144-block window \u00b7 YES wins when endpoint target is at or below the strike (difficulty at or above strike).\n\nWindow details unavailable.\n\nYES for sale\n\u2014\n\nNo current quote.\n\nTake\nNO for sale\n\u2014\n\nNo current quote.\n\nTake\n\nRead-only board. Taking is unavailable until wallet verification and signing are integrated.\n\nWaiting for a fresh maker snapshot.\n\nPrices are stakes in satoshis, not probabilities. Network fees are additional. Weekly Pop is deferred.\n\nRecent pops\n\nNo Daily pops recorded yet.",
+      "passed": true
+    },
+    {
+      "state": "offline",
+      "status": "maker offline \u2014 showing settled markets only",
+      "dom": "MARKETS \u00b7 POP-1\nWatch the next pop\n\nDaily difficulty. Two sides. One chain-settled outcome.\n\nLive maker quotes \u00b7 Daily Pop\n\nmaker offline \u2014 showing settled markets only\n\n144-block window \u00b7 YES wins when endpoint target is at or below the strike (difficulty at or above strike).\n\nWindow details unavailable.\n\nYES for sale\n\u2014\n\nNo current quote.\n\nTake\nNO for sale\n\u2014\n\nNo current quote.\n\nTake\n\nRead-only board. Taking is unavailable until wallet verification and signing are integrated.\n\nCannot reach a usable maker book. Prices will return when the connection recovers.\n\nPrices are stakes in satoshis, not probabilities. Network fees are additional. Weekly Pop is deferred.\n\nRecent pops\n\nNo Daily pops recorded yet.",
+      "passed": true
+    },
+    {
+      "state": "non-json",
+      "status": "maker offline \u2014 showing settled markets only",
+      "dom": "MARKETS \u00b7 POP-1\nWatch the next pop\n\nDaily difficulty. Two sides. One chain-settled outcome.\n\nLive maker quotes \u00b7 Daily Pop\n\nmaker offline \u2014 showing settled markets only\n\n144-block window \u00b7 YES wins when endpoint target is at or below the strike (difficulty at or above strike).\n\nWindow details unavailable.\n\nYES for sale\n\u2014\n\nNo current quote.\n\nTake\nNO for sale\n\u2014\n\nNo current quote.\n\nTake\n\nRead-only board. Taking is unavailable until wallet verification and signing are integrated.\n\nCannot reach a usable maker book. Prices will return when the connection recovers.\n\nPrices are stakes in satoshis, not probabilities. Network fees are additional. Weekly Pop is deferred.\n\nRecent pops\n\nNo Daily pops recorded yet.",
+      "passed": true
+    },
+    {
+      "state": "stale-flag",
+      "status": "quotes stale",
+      "dom": "MARKETS \u00b7 POP-1\nWatch the next pop\n\nDaily difficulty. Two sides. One chain-settled outcome.\n\nLive maker quotes \u00b7 Daily Pop\n\nquotes stale\n\n144-block window \u00b7 YES wins when endpoint target is at or below the strike (difficulty at or above strike).\n\nWindow details unavailable.\n\nYES for sale\n\u2014\n\nNo current quote.\n\nTake\nNO for sale\n\u2014\n\nNo current quote.\n\nTake\n\nRead-only board. Taking is unavailable until wallet verification and signing are integrated.\n\nWaiting for a fresh maker snapshot.\n\nPrices are stakes in satoshis, not probabilities. Network fees are additional. Weekly Pop is deferred.\n\nRecent pops\n\nNo Daily pops recorded yet.",
+      "passed": true
+    },
+    {
+      "state": "dry-run-stopped",
+      "status": "book stopped",
+      "dom": "MARKETS \u00b7 POP-1\nWatch the next pop\n\nDaily difficulty. Two sides. One chain-settled outcome.\n\nLive maker quotes \u00b7 Daily Pop\n\nbook stopped\n\nDRY-RUN \u2014 quotes not takable\n\n144-block window \u00b7 YES wins when endpoint target is at or below the strike (difficulty at or above strike).\n\nWindow details unavailable.\n\nYES for sale\n\u2014\n\nNo current quote.\n\nTake\nNO for sale\n\u2014\n\nNo current quote.\n\nTake\n\nRead-only board. Taking is unavailable until wallet verification and signing are integrated.\n\nThe maker has paused its book.\n\nPrices are stakes in satoshis, not probabilities. Network fees are additional. Weekly Pop is deferred.\n\nRecent pops\n\nNo Daily pops recorded yet.",
+      "passed": true
+    },
+    {
+      "state": "90-second local expiry",
+      "passed": true
+    },
+    {
+      "state": "20s cadence, hidden pause and resume",
+      "passed": true,
+      "note": "visibility property simulated; browser timers exercised"
+    },
+    {
+      "state": "mobile no overflow",
+      "passed": true
+    }
+  ],
+  "page_errors": []
+}

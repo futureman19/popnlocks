@@ -9,8 +9,6 @@
       content="pop nLocks. Binary markets on Bitcoin difficulty, settled by the chain itself. No oracle, no reporter, no dispute window. The winner pops the lock."
     />
     <meta name="theme-color" content="#0b0c0e" />
-    <!-- Optional maker base URL. This board is read-only even when configured. -->
-    <meta name="popnlocks-maker" content="" />
     <meta property="og:type" content="website" />
     <meta property="og:url" content="https://popnlocks.com/" />
     <meta property="og:title" content="popnlocks — pop nLocks" />
@@ -252,6 +250,12 @@
       .market-status {
         color: var(--gold);
         font-size: 12px;
+      }
+      #maker-mode:not(:empty) {
+        margin-top: 16px;
+        padding: 12px;
+        border: 1px solid var(--gold);
+        font-weight: 700;
       }
       .market-note,
       .market-detail {
@@ -552,11 +556,12 @@
         </p>
         <article class="market-card" aria-labelledby="daily-title">
           <div class="market-top">
-            <h3 id="daily-title">Daily Pop</h3>
+            <h3 id="daily-title">Live maker quotes · Daily Pop</h3>
             <p id="market-status" class="market-status" role="status">
-              Maker offline
+              Connecting to maker…
             </p>
           </div>
+          <p id="maker-mode" class="market-status" role="status"></p>
           <p class="market-note">
             144-block window · YES wins when endpoint target is at or below the
             strike (difficulty at or above strike).
@@ -567,19 +572,19 @@
           <p id="market-strike" class="market-detail"></p>
           <div class="market-sides">
             <div class="market-side">
-              <h4>YES</h4>
+              <h4>YES for sale</h4>
               <strong id="yes-price" class="market-price">—</strong>
               <p id="yes-detail" class="market-detail">No current quote.</p>
               <button type="button" disabled aria-describedby="take-reason">
-                Take YES
+                Take
               </button>
             </div>
             <div class="market-side">
-              <h4>NO</h4>
+              <h4>NO for sale</h4>
               <strong id="no-price" class="market-price">—</strong>
               <p id="no-detail" class="market-detail">No current quote.</p>
               <button type="button" disabled aria-describedby="take-reason">
-                Take NO
+                Take
               </button>
             </div>
           </div>
@@ -741,6 +746,7 @@
       </div>
     </footer>
     <script>
+      const MAKER_BASE_URL = "https://api.popnlocks.com";
       (() => {
         // Display-only parsing, NOT transaction/chain authentication.
         // No wallet, key entry, /take or broadcast path exists in this increment.
@@ -753,6 +759,9 @@
         const hex = (s, length) =>
           typeof s === "string" && new RegExp(`^[0-9a-f]{${length}}$`).test(s);
         let book = null;
+        let pollTimer;
+        let expiryTimer;
+        let polling = false;
         function clear(label, detail) {
           text("market-status", label);
           text("market-update", detail);
@@ -767,7 +776,10 @@
           const m = q && q.market;
           return (
             m &&
-            hex(q.quoteId, 64) &&
+            typeof q.quoteId === "string" &&
+            q.quoteId.length > 0 &&
+            q.quoteId.length <= 128 &&
+            q.quoteId.trim() === q.quoteId &&
             hex(q.makerPKH, 40) &&
             ["yes", "no"].includes(q.makerSide) &&
             m.window === 144 &&
@@ -793,14 +805,18 @@
         function render() {
           if (!book) return;
           const s = book.status;
+          text(
+            "maker-mode",
+            s.mode === "dry-run" ? "DRY-RUN — quotes not takable" : ""
+          );
           if (s.stopped)
-            return clear("Maker stopped", "The maker has paused its book.");
+            return clear("book stopped", "The maker has paused its book.");
           if (
             s.stale ||
-            Date.now() - s.refreshedAt > 90000 ||
-            s.refreshedAt > Date.now() + 5000
+            Date.now() - s.refreshedAt >= 90000 ||
+            s.refreshedAt > Date.now()
           )
-            return clear("Quotes stale", "Waiting for a fresh maker snapshot.");
+            return clear("quotes stale", "Waiting for a fresh maker snapshot.");
           const quotes = book.quotes;
           if (!quotes.length)
             return clear(
@@ -838,7 +854,7 @@
               s.refreshedAt
             ).toLocaleTimeString()} · height ${sats(
               s.currentHeight
-            )}. Refreshes every 30 seconds; not independently chain-verified.`
+            )}. Refreshes every 20 seconds; not independently chain-verified.`
           );
           const remaining = m.anchorHeight + 144 - s.currentHeight;
           text(
@@ -866,7 +882,9 @@
                 m.bounty * 3
               )} sats in crank bounties · quote expires at block ${sats(
                 q.expiryHeight
-              )}.`
+              )} · about ${sats(
+                (q.expiryHeight - s.currentHeight) * 10
+              )} minutes from snapshot at 10 min/block (estimate).`
             );
           }
         }
@@ -886,9 +904,7 @@
             clearTimeout(timeout);
           }
         }
-        const configured = document
-          .querySelector('meta[name="popnlocks-maker"]')
-          .content.trim();
+        const configured = MAKER_BASE_URL;
         let endpoint;
         try {
           if (configured) {
@@ -905,9 +921,15 @@
             endpoint = new URL(base.href.replace(/\/$/, "") + "/quotes");
           }
         } catch {
-          clear("Maker offline", "The configured maker URL is unavailable.");
+          clear(
+            "maker offline — showing settled markets only",
+            "The configured maker URL is unavailable."
+          );
         }
         async function poll() {
+          if (document.hidden || polling) return;
+          clearTimeout(pollTimer);
+          polling = true;
           try {
             const data = await getJSON(endpoint);
             const s = data && data.status;
@@ -925,20 +947,35 @@
             )
               throw new Error("Invalid book");
             book = data;
+            clearTimeout(expiryTimer);
             render();
+            // Expire at the original producer timestamp, never at fetch time.
+            const remaining = s.refreshedAt + 90000 - Date.now();
+            if (remaining > 0 && remaining <= 90000)
+              expiryTimer = setTimeout(render, remaining);
           } catch {
             book = null;
+            text("maker-mode", "");
             clear(
-              "Maker offline",
+              "maker offline — showing settled markets only",
               "Cannot reach a usable maker book. Prices will return when the connection recovers."
             );
           } finally {
-            setTimeout(poll, 30000);
+            polling = false;
+            if (!document.hidden) pollTimer = setTimeout(poll, 20000);
           }
         }
         if (endpoint) {
           poll();
-          setInterval(render, 1000);
+          setInterval(() => {
+            if (!document.hidden) render();
+          }, 1000);
+          document.addEventListener("visibilitychange", () => {
+            clearTimeout(pollTimer);
+            // Recheck age synchronously before showing a resumed snapshot.
+            render();
+            if (!document.hidden) poll();
+          });
         }
         // Browsers block file:// JSON fetches. Leave an honest preview fallback,
         // rather than issue a request guaranteed to produce a CORS console error.
