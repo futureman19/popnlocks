@@ -209,6 +209,8 @@ describe('QA focused: offline timeout and concurrency boundaries', () => {
     afterEach(() => rmSync(dir, { recursive: true, force: true }))
 
     it('enforces header/body request timeouts with generic 408 responses', async () => {
+        const headerCanary = 'qa-header-canary-408'
+        const bodyCanary = 'qa-body-canary-408'
         const app = server({
             view: () => ({ quotes: [], status: {} }),
             take: async () => ({ halfSignedTxHex: '00' }),
@@ -229,18 +231,26 @@ describe('QA focused: offline timeout and concurrency boundaries', () => {
             const headers = await rawResponse(
                 port,
                 'POST /take HTTP/1.1\r\nHost: localhost\r\n' +
-                    'Content-Type: application/json\r\nConnection: close\r\n'
+                    'Content-Type: application/json\r\nConnection: close\r\n' +
+                    'X-QA-Canary: ' +
+                    headerCanary +
+                    '\r\n'
             )
-            expect(headers).includes(' 408 ')
-            expect(headers).not.includes('synthetic-secret')
             const body = await rawResponse(
                 port,
                 'POST /take HTTP/1.1\r\nHost: localhost\r\n' +
                     'Content-Type: application/json\r\nContent-Length: 100\r\n' +
-                    'Connection: close\r\n\r\n{'
+                    'Connection: close\r\n\r\n{"qa":"' +
+                    bodyCanary +
+                    '"'
             )
-            expect(body).includes(' 408 ')
-            expect(body).not.includes('synthetic-secret')
+            for (const response of [headers, body]) {
+                expect(response.split('\r\n')[0]).eq(
+                    'HTTP/1.1 408 Request Timeout'
+                )
+                expect(response).not.includes(headerCanary)
+                expect(response).not.includes(bodyCanary)
+            }
         } finally {
             await close(app)
         }
@@ -284,6 +294,7 @@ describe('QA focused: offline timeout and concurrency boundaries', () => {
             const slow = await bounded(first)
             expect(slow.status).eq(503)
             const text = await slow.text()
+            expect(text).eq('{"error":"UNAVAILABLE"}')
             expect(JSON.parse(text)).deep.eq({ error: 'UNAVAILABLE' })
             expect(text).not.includes('synthetic-secret-internal-detail')
             expect(ledger.all()).length(1)
@@ -320,17 +331,23 @@ describe('QA focused: offline timeout and concurrency boundaries', () => {
         }
     })
 
-    it('allows one signer while overlapping duplicate and distinct takes get BUSY', async () => {
-        const entered = deferred()
-        const release = deferred()
+    it('rejects overlapping duplicate and distinct takes at the first height read', async () => {
+        const heightStarted = deferred()
+        const firstHeight = deferred<number>()
+        chain.height = async () => {
+            heightCalls++
+            if (heightCalls === 1) {
+                heightStarted.resolve()
+                return firstHeight.promise
+            }
+            return HEIGHT
+        }
         maker = new Maker(
             config,
             chain,
             ledger,
             async (hex) => {
                 signerCalls++
-                entered.resolve()
-                await release.promise
                 return goodSignature(hex)
             },
             () => clock
@@ -341,22 +358,28 @@ describe('QA focused: offline timeout and concurrency boundaries', () => {
         maker.refreshedAt = clock
         const first = maker.take(request(firstQuote))
         try {
-            await bounded(entered.promise)
+            await bounded(heightStarted.promise)
+            expect(heightCalls).eq(1)
+            expect(ledger.all()).length(0)
+            expect(signerCalls).eq(0)
             const before = heightCalls
             const duplicate = maker.take(request(firstQuote))
             const other = maker.take(request(otherQuote, '4'.repeat(64)))
-            // BUSY is the synchronous pre-await gate, not a later chain response.
+            // BUSY is the synchronous pre-await gate, before any competing chain work.
             expect(heightCalls).eq(before)
+            expect(ledger.all()).length(0)
+            expect(signerCalls).eq(0)
             await rejects(duplicate, 'BUSY')
             await rejects(other, 'BUSY')
-            expect(signerCalls).eq(1)
-            expect(ledger.all()).length(1)
-            release.resolve()
+            expect(heightCalls).eq(before)
+            expect(ledger.all()).length(0)
+            expect(signerCalls).eq(0)
+            firstHeight.resolve(HEIGHT)
             expect((await first).halfSignedTxHex).matches(/^[0-9a-f]+$/)
             expect(signerCalls).eq(1)
             expect(ledger.all()).length(1)
         } finally {
-            release.resolve()
+            firstHeight.resolve(HEIGHT)
             await first.catch(() => undefined)
         }
     })
@@ -367,7 +390,9 @@ describe('QA focused: offline timeout and concurrency boundaries', () => {
         await maker.take(request(firstQuote))
         expect(signerCalls).eq(1)
         maker.quotes = [firstQuote, firstQuote]
+        const beforeReplayHeightCalls = heightCalls
         await rejects(maker.take(request(firstQuote)), 'RESERVED')
+        expect(heightCalls).eq(beforeReplayHeightCalls)
         expect(ledger.all()).length(1)
         expect(() =>
             ledger.reserve(
