@@ -29,6 +29,7 @@ market = dict(anchorHeight=974304, anchorTipHex='a'*64, anchorBits=486604799, wi
 quotes = [dict(quoteId=c*64, market=market, makerSide=side, makerStake=10000-stake, takerStake=stake, makerPKH='b'*40, expiryHeight=974420) for c, side, stake in [('c','no',5400),('d','yes',6000)]]
 base = dict(quotes=quotes, status=dict(mode='dry-run', stopped=False, stale=False, currentHeight=974417, refreshedAt=0))
 results=[]
+focused=[]
 try:
   with tempfile.TemporaryDirectory(prefix='board-qa-', dir=ROOT) as temp, sync_playwright() as pw:
     # Fail closed even for speculative connections outside Playwright routing.
@@ -117,6 +118,105 @@ try:
           assert 'quotes stale' in page.locator('#market-status').inner_text()
         results.append(f'{protocol}/{case}: PASS')
         page.close()
+    # Focused real-browser polling probes. The same DNS/proxy/route guard remains active.
+    controlled_fetch='''window.__calls=[]; window.__waiting=[]; window.__active=0;
+      window.__hold=HOLD; window.__book=BOOK; const originalFetch=window.fetch;
+      window.fetch=(url,options={}) => {
+        const target=String(url);
+        if(target===ENDPOINT) {
+          window.__calls.push({url:target,method:options.method || 'GET',at:Date.now()});
+          if(window.__hold) {
+            window.__active++;
+            return new Promise((resolve,reject) => {
+              const pending={settled:false};
+              pending.resolve=(book) => {
+                if(pending.settled) return; pending.settled=true; window.__active--;
+                resolve(new Response(JSON.stringify(book),{status:200,headers:{'Content-Type':'application/json'}}));
+              };
+              pending.reject=() => {
+                if(pending.settled) return; pending.settled=true; window.__active--;
+                reject(new DOMException('Aborted','AbortError'));
+              };
+              window.__waiting.push(pending);
+              options.signal?.addEventListener('abort',pending.reject,{once:true});
+            });
+          }
+          return Promise.resolve(new Response(JSON.stringify(window.__book),{status:200,headers:{'Content-Type':'application/json'}}));
+        }
+        if(target==='data/pops.json') return Promise.resolve(new Response('[]'));
+        return originalFetch(url,options);
+      };
+      window.__release=(book) => {
+        const pending=window.__waiting.find(p=>!p.settled);
+        if(!pending) throw new Error('no pending quote fixture');
+        pending.resolve(book);
+      };'''.replace('ENDPOINT',json.dumps(maker+'/quotes'))
+    def focused_page(hold,book):
+      page,blocked=isolated_page({'width':390,'height':844},None,reduced_motion='reduce')
+      page.clock.install()
+      errors=[]
+      page.on('pageerror',lambda e: errors.append(str(e)))
+      page.on('console',lambda m: errors.append(m.text) if m.type=='error' else None)
+      script=controlled_fetch.replace('HOLD','true' if hold else 'false').replace('BOOK',json.dumps(book))
+      page.add_init_script(script)
+      html=SOURCE.replace(declaration,f'const MAKER_BASE_URL = "{maker}";')
+      page.route(url,lambda r:r.fulfill(body=html,content_type='text/html'))
+      page.goto(url)
+      return page,blocked,errors
+    fresh=copy.deepcopy(base); fresh['status']['refreshedAt']=int(time.time()*1000)
+    # A slow request aborts at ten seconds; the next poll starts twenty seconds later, never alongside it.
+    page,blocked,errors=focused_page(True,fresh)
+    page.wait_for_function('window.__calls.length===1 && window.__active===1')
+    page.clock.fast_forward(9999)
+    assert len(page.evaluate('window.__calls'))==1
+    page.clock.fast_forward(1)
+    page.wait_for_function("document.getElementById('market-status').textContent.includes('maker offline')")
+    assert page.evaluate('window.__active')==0
+    page.evaluate('(book)=>{window.__hold=false;window.__book=book}',fresh)
+    page.clock.fast_forward(18000)
+    assert len(page.evaluate('window.__calls'))==1
+    page.clock.fast_forward(3000)
+    page.wait_for_function("document.getElementById('market-status').textContent.includes('Dry-run')")
+    assert len(page.evaluate('window.__calls'))==2
+    assert page.evaluate('window.__active')==0
+    assert all(c['method']=='GET' for c in page.evaluate('window.__calls'))
+    assert blocked==[] and errors==[],(blocked,errors)
+    focused.append('focused/slow-poll-timeout-and-serial-retry: PASS')
+    page.close()
+    # A delayed older producer snapshot renders stale/empty, never its old prices or over a newer display.
+    page,blocked,errors=focused_page(False,fresh)
+    page.wait_for_function("document.getElementById('market-status').textContent.includes('Dry-run')")
+    assert len(page.evaluate('window.__calls'))==1
+    stale=copy.deepcopy(base)
+    stale['status']['refreshedAt']=0
+    stale['quotes'][0]['quoteId']='1'*64; stale['quotes'][0]['takerStake']=1111; stale['quotes'][0]['makerStake']=8889
+    stale['quotes'][1]['quoteId']='2'*64; stale['quotes'][1]['takerStake']=2222; stale['quotes'][1]['makerStake']=7778
+    page.evaluate('(book)=>{window.__hold=true;window.__book=book}',stale)
+    page.clock.fast_forward(20000)
+    page.wait_for_function('window.__calls.length===2 && window.__active===1')
+    page.clock.fast_forward(9000)
+    assert len(page.evaluate('window.__calls'))==2
+    page.evaluate('(book)=>window.__release(book)',stale)
+    page.wait_for_function("document.getElementById('market-status').textContent.includes('quotes stale')")
+    assert page.locator('#yes-price').inner_text()=='—'
+    assert page.locator('#no-price').inner_text()=='—'
+    assert '1,111' not in page.locator('#markets').inner_text()
+    assert '2,222' not in page.locator('#markets').inner_text()
+    page.clock.fast_forward(18000)
+    assert len(page.evaluate('window.__calls'))==2
+    page.evaluate('''()=>{window.__hold=false;window.__book=JSON.parse(JSON.stringify(window.__book));
+      window.__book.status.refreshedAt=Date.now();window.__book.status.stale=false;
+      window.__book.quotes[0].takerStake=5400;window.__book.quotes[0].makerStake=4600;
+      window.__book.quotes[1].takerStake=6000;window.__book.quotes[1].makerStake=4000;}''')
+    page.clock.fast_forward(3000)
+    page.wait_for_function("document.getElementById('market-status').textContent.includes('Dry-run')")
+    assert len(page.evaluate('window.__calls'))==3
+    assert page.locator('#yes-price').inner_text()=='5,400 sats'
+    assert page.locator('#no-price').inner_text()=='6,000 sats'
+    assert all(c['method']=='GET' for c in page.evaluate('window.__calls'))
+    assert blocked==[] and errors==[],(blocked,errors)
+    focused.append('focused/delayed-stale-response-cannot-overwrite-live-display: PASS')
+    page.close()
     # Real served and file documents, unmodified configuration and history fetch.
     for target in [url,(ROOT/'docs/index.html').as_uri()]:
       page,blocked=isolated_page({'width':1280,'height':900}, (ROOT/'docs/index.html').as_uri())
@@ -130,4 +230,5 @@ try:
 finally:
   server.shutdown();server.server_close()
 print('\n'.join(results))
-print(f'{len(results)} fixture scenarios passed; real served/file offline reads passed (production GET /quotes blocked before DNS); Receipts unchanged.')
+print('\n'.join(focused))
+print(f'{len(results)} fixture scenarios + {len(focused)} focused polling probes passed; real served/file offline reads passed (production GET /quotes blocked before DNS); Receipts unchanged.')
