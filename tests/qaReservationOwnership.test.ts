@@ -1,8 +1,10 @@
 import { strict as assert } from 'assert'
-import { spawn } from 'child_process'
+import { spawn, spawnSync } from 'child_process'
 import { createRequire } from 'module'
 import {
     existsSync,
+    openSync,
+    closeSync,
     mkdtempSync,
     readFileSync,
     rmSync,
@@ -199,6 +201,14 @@ if (require.main === module) {
             )
             rmSync(dir, { recursive: true, force: true })
         })
+        const offlineEnv = () => ({
+            SystemRoot: process.env.SystemRoot,
+            PATH: process.env.PATH,
+            TEMP: dir,
+            TMP: dir,
+            NETWORK: 'local',
+            npm_config_offline: 'true',
+        })
         function start(name: string, id: string, phase = 'normal', peer = '-') {
             const c = spawn(
                 process.execPath,
@@ -214,14 +224,7 @@ if (require.main === module) {
                 ],
                 {
                     cwd: process.cwd(),
-                    env: {
-                        SystemRoot: process.env.SystemRoot,
-                        PATH: process.env.PATH,
-                        TEMP: dir,
-                        TMP: dir,
-                        NETWORK: 'local',
-                        npm_config_offline: 'true',
-                    },
+                    env: offlineEnv(),
                     stdio: 'ignore',
                     timeout: 45000,
                     killSignal: 'SIGKILL',
@@ -330,5 +333,37 @@ if (require.main === module) {
             assert.deepEqual(events('retry'), ['EEXIST'])
             assert.deepEqual(holds(), rows)
             assert.ok(existsSync(join(dir, 'maker.lock')))
+        })
+        it('reports a held lock without exposing local paths from the executable', () => {
+            const lock = join(dir, 'maker.lock')
+            const config = join(dir, 'config.json')
+            const fd = openSync(lock, 'wx', 0o600)
+            try {
+                const run = spawnSync(
+                    process.execPath,
+                    [
+                        '-r',
+                        require.resolve('ts-node/register/transpile-only'),
+                        require.resolve('../maker/cli.ts'),
+                        '--live',
+                        '--config=' + config,
+                    ],
+                    {
+                        env: offlineEnv(),
+                        stdio: ['ignore', 'pipe', 'pipe'],
+                        encoding: 'utf8',
+                        timeout: 45000,
+                        killSignal: 'SIGKILL',
+                    }
+                )
+                assert.ifError(run.error)
+                assert.equal(run.status, 1)
+                assert.equal(run.stdout, '')
+                assert.ok(existsSync(lock))
+                assert.ok(!existsSync(join(dir, 'holds.jsonl')))
+                assert.equal(run.stderr, 'MAKER_ALREADY_RUNNING\n')
+            } finally {
+                closeSync(fd)
+            }
         })
     })

@@ -50,7 +50,15 @@ export async function main(args = process.argv.slice(2)) {
     if (live) {
         mkdirSync(state, { recursive: true })
         const lock = join(state, 'maker.lock')
-        const fd = openSync(lock, 'wx', 0o600)
+        let fd: number
+        try {
+            fd = openSync(lock, 'wx', 0o600)
+        } catch (e) {
+            if ((e as NodeJS.ErrnoException).code !== 'EEXIST') throw e
+            throw Object.assign(new Error('MAKER_ALREADY_RUNNING'), {
+                code: 'EEXIST',
+            })
+        }
         process.once('exit', () => {
             closeSync(fd)
             unlinkSync(lock)
