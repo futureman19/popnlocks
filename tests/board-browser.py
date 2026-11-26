@@ -10,6 +10,7 @@ import subprocess
 import tempfile
 import threading
 import time
+from urllib.parse import urlsplit
 from playwright.sync_api import sync_playwright
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -30,12 +31,33 @@ base = dict(quotes=quotes, status=dict(mode='dry-run', stopped=False, stale=Fals
 results=[]
 try:
   with tempfile.TemporaryDirectory(prefix='board-qa-', dir=ROOT) as temp, sync_playwright() as pw:
-    browser = pw.chromium.launch()
+    # Fail closed even for speculative connections outside Playwright routing.
+    browser = pw.chromium.launch(args=['--host-resolver-rules=MAP * ~NOTFOUND, EXCLUDE 127.0.0.1',
+        '--proxy-server=http://127.0.0.1:0', '--proxy-bypass-list=127.0.0.1'])
+    maker = url.replace('/index.html', '')
+    production = 'https://api.popnlocks.com'
+    declaration = f'const MAKER_BASE_URL = "{production}";'
+    assert SOURCE.count(declaration) == 1
+    def isolated_page(viewport, file_url=None, **options):
+      page = browser.new_page(viewport=viewport, service_workers='block', **options)
+      blocked = []
+      def guard(route):
+        target = route.request.url
+        if route.request.method == 'GET':
+          if target in (url, maker+'/data/pops.json', file_url):
+            return route.continue_()
+          if urlsplit(target).netloc == 'fonts.googleapis.com':
+            return route.fulfill(body='', content_type='text/css')
+        blocked.append(target)
+        route.abort('blockedbyclient')
+      page.context.route('**/*', guard)
+      page.context.route_web_socket('**/*', lambda ws: (blocked.append(ws.url), ws.close()))
+      return page, blocked
     for protocol in ['served', 'file']:
       for case in ['unset','dry-run','live','offline','stale','stopped','empty','expired','malformed','conflicting','history']:
         data=copy.deepcopy(base)
         data['status']['refreshedAt']=int(time.time()*1000)
-        expected={'unset':'Maker offline','dry-run':'Dry-run','live':'Maker quotes','offline':'Maker offline','stale':'Quotes stale','stopped':'Maker stopped','empty':'No open quotes','expired':'Quotes unavailable','malformed':'Maker offline','conflicting':'Quotes unavailable','history':'Dry-run'}[case]
+        expected={'unset':'maker offline — showing settled markets only','dry-run':'Dry-run','live':'Maker quotes','offline':'maker offline — showing settled markets only','stale':'quotes stale','stopped':'book stopped','empty':'No open quotes','expired':'Quotes unavailable','malformed':'maker offline — showing settled markets only','conflicting':'Quotes unavailable','history':'Dry-run'}[case]
         if case=='live': data['status']['mode']='live'
         if case=='stale': data['status']['refreshedAt']-=91000
         if case=='stopped': data['status']['stopped']=True
@@ -43,27 +65,30 @@ try:
         if case=='expired': data['quotes'][0]['expiryHeight']=974417
         if case=='malformed': data={'quotes':[]}
         if case=='conflicting': data['quotes'][1]['market']={**data['quotes'][1]['market'], 'strikeTarget':'42'}
-        html=SOURCE if case=='unset' else SOURCE.replace('name="popnlocks-maker" content=""','name="popnlocks-maker" content="https://maker.invalid"')
-        page=browser.new_page(viewport={'width':390,'height':844}, reduced_motion='reduce')
+        # Unset means no harness override: the real default must fail offline.
+        html=SOURCE if case=='unset' else SOURCE.replace(declaration, f'const MAKER_BASE_URL = "{maker}";')
+        path=Path(temp)/'index.html'
+        page,blocked=isolated_page({'width':390,'height':844}, path.as_uri(), reduced_motion='reduce')
         if case=='live' and protocol=='served': page.clock.install()
         errors=[]
         page.on('pageerror',lambda e: errors.append(str(e)))
-        page.on('console',lambda m: errors.append(m.text) if m.type=='error' else None)
-        # Avoid external font/network variability; not part of board functionality.
-        page.route('https://fonts.googleapis.com/**',lambda r:r.fulfill(status=200,body='',content_type='text/css'))
+        def console(m):
+          if m.type=='error' and not (case=='unset' and m.location['url']==production+'/quotes'
+                                      and 'ERR_BLOCKED_BY_CLIENT' in m.text): errors.append(m.text)
+        page.on('console',console)
         history=[dict(marketId='fixture-only',winnerSide='yes',txids=['e'*64]) ] if case=='history' else []
         page.add_init_script('''window.__calls=[]; const originalFetch=window.fetch;
           window.fetch=async (url, options) => {
             window.__calls.push({url:String(url),method:options?.method || 'GET',at:Date.now()});
-            if(String(url).includes('maker.invalid')) { REJECT return new Response(JSON.stringify(BOOK)); }
+            if(String(url)===ENDPOINT) { REJECT return new Response(JSON.stringify(BOOK)); }
             if(String(url)==='data/pops.json') return new Response(JSON.stringify(HISTORY));
             return originalFetch(url,options);
-          };'''.replace('REJECT',"throw new Error('isolated offline fixture');" if case=='offline' else '').replace('BOOK',json.dumps(data)).replace('HISTORY',json.dumps(history)))
+          };'''.replace('REJECT',"throw new Error('isolated offline fixture');" if case=='offline' else '').replace('ENDPOINT',json.dumps(maker+'/quotes')).replace('BOOK',json.dumps(data)).replace('HISTORY',json.dumps(history)))
         if protocol=='served':
           page.route(url,lambda r:r.fulfill(body=html,content_type='text/html'))
           page.goto(url)
         else:
-          path=Path(temp)/'index.html'; path.write_text(html,encoding='utf-8'); page.goto(path.as_uri())
+          path.write_text(html,encoding='utf-8'); page.goto(path.as_uri())
         page.wait_for_timeout(150)
         assert expected in page.locator('#market-status').inner_text(), (protocol,case,page.locator('#market-status').inner_text())
         assert page.locator('#markets button:disabled').count()==2
@@ -78,25 +103,26 @@ try:
           assert '9,700' in page.locator('#yes-detail').inner_text()
           assert '31 blocks' in page.locator('#market-window').inner_text()
         if case=='history' and protocol=='served': assert page.locator('#pops-list a').count()==1
-        if case=='unset': assert not any('maker.invalid' in c['url'] for c in calls)
+        assert blocked == ([production+'/quotes'] if case=='unset' else []), (protocol,case,blocked)
+        if case=='unset': assert not any(c['url']==maker+'/quotes' for c in calls)
         if case in ['dry-run', 'unset'] and protocol=='served':
           page.locator('#markets').screenshot(path=str(ROOT/f'board-mobile-{case}.png'))
         assert not errors,(protocol,case,errors)
         if case=='live' and protocol=='served':
-          page.clock.fast_forward(29000)
-          assert len([c for c in page.evaluate('window.__calls') if 'maker.invalid' in c['url']])==1
+          page.clock.fast_forward(19000)
+          assert len([c for c in page.evaluate('window.__calls') if c['url']==maker+'/quotes'])==1
           page.clock.fast_forward(2000)
-          assert len([c for c in page.evaluate('window.__calls') if 'maker.invalid' in c['url']])==2
+          assert len([c for c in page.evaluate('window.__calls') if c['url']==maker+'/quotes'])==2
           page.clock.fast_forward(91000)
-          assert 'Quotes stale' in page.locator('#market-status').inner_text()
+          assert 'quotes stale' in page.locator('#market-status').inner_text()
         results.append(f'{protocol}/{case}: PASS')
         page.close()
     # Real served and file documents, unmodified configuration and history fetch.
     for target in [url,(ROOT/'docs/index.html').as_uri()]:
-      page=browser.new_page(viewport={'width':1280,'height':900})
-      page.route('https://fonts.googleapis.com/**',lambda r:r.fulfill(body='',content_type='text/css'))
+      page,blocked=isolated_page({'width':1280,'height':900}, (ROOT/'docs/index.html').as_uri())
       page.goto(target); page.wait_for_timeout(200)
-      assert page.locator('#market-status').inner_text()=='Maker offline'
+      assert page.locator('#market-status').inner_text()=='maker offline — showing settled markets only'
+      assert blocked == [production+'/quotes'], (target,blocked)
       if target==url: assert page.locator('#pops-status').inner_text()=='No Daily pops recorded yet.'
       page.locator('#markets').screenshot(path=str(ROOT/'board-preview.png'))
       page.close()
@@ -104,4 +130,4 @@ try:
 finally:
   server.shutdown();server.server_close()
 print('\n'.join(results))
-print(f'{len(results)} fixture scenarios passed; real served/file offline reads passed; Receipts unchanged.')
+print(f'{len(results)} fixture scenarios passed; real served/file offline reads passed (production GET /quotes blocked before DNS); Receipts unchanged.')
