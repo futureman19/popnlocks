@@ -30,7 +30,7 @@ quotes = [dict(quoteId=c*64, market=market, makerSide=side, makerStake=10000-sta
 base = dict(quotes=quotes, status=dict(mode='dry-run', stopped=False, stale=False, currentHeight=974417, refreshedAt=0))
 results=[]
 focused=[]
-characterizations=[]
+regressions=[]
 try:
   with tempfile.TemporaryDirectory(prefix='board-qa-', dir=ROOT) as temp, sync_playwright() as pw:
     # Fail closed even for speculative connections outside Playwright routing.
@@ -193,7 +193,7 @@ try:
     assert blocked==[] and errors==[],(blocked,errors)
     focused.append('focused/slow-poll-timeout-and-serial-retry: PASS')
     page.close()
-    # A delayed older producer snapshot renders stale/empty, never its old prices or over a newer display.
+    # A delayed older producer snapshot, even an expired one, cannot replace the newer display or expiry schedule.
     page,blocked,errors=focused_page(False,fresh)
     page.wait_for_function("document.getElementById('market-status').textContent.includes('Dry-run')")
     assert len(page.evaluate('window.__calls'))==1
@@ -207,9 +207,11 @@ try:
     page.clock.fast_forward(9000)
     assert len(page.evaluate('window.__calls'))==2
     page.evaluate('(book)=>window.__release(book)',stale)
-    page.wait_for_function("document.getElementById('market-status').textContent.includes('quotes stale')")
-    assert page.locator('#yes-price').inner_text()=='—'
-    assert page.locator('#no-price').inner_text()=='—'
+    page.wait_for_function('window.__calls.length===2 && window.__active===0')
+    page.wait_for_timeout(100)
+    assert 'Dry-run' in page.locator('#market-status').inner_text()
+    assert page.locator('#yes-price').inner_text()=='5,400 sats'
+    assert page.locator('#no-price').inner_text()=='6,000 sats'
     assert '1,111' not in page.locator('#markets').inner_text()
     assert '2,222' not in page.locator('#markets').inner_text()
     page.clock.fast_forward(18000)
@@ -227,8 +229,8 @@ try:
     assert blocked==[] and errors==[],(blocked,errors)
     focused.append('focused/delayed-stale-response-cannot-overwrite-live-display: PASS')
     page.close()
-    # CHARACTERIZATION, not a safety PASS: sequential fresh responses with decreasing producer time.
-    # This is distinct from the expired snapshot above; both snapshots remain inside 90 seconds.
+    # REGRESSION: sequential fresh responses with decreasing producer time must retain the newer book.
+    # This is distinct from the expired snapshot above; every response remains inside 90 seconds.
     newer=copy.deepcopy(base)
     characterization_now=1795718400000
     newer_timestamp=characterization_now-10000
@@ -239,12 +241,15 @@ try:
     assert page.evaluate('window.__active')==0
     before_yes=page.locator('#yes-price').inner_text()
     before_no=page.locator('#no-price').inner_text()
+    before_window=page.locator('#market-window').inner_text()
+    before_yes_detail=page.locator('#yes-detail').inner_text()
     assert before_yes=='5,400 sats' and before_no=='6,000 sats'
     older=copy.deepcopy(base)
     older_timestamp=newer_timestamp-10000
     older['status']['refreshedAt']=older_timestamp
-    older['quotes'][0]['quoteId']='1'*64; older['quotes'][0]['takerStake']=1111; older['quotes'][0]['makerStake']=8889
-    older['quotes'][1]['quoteId']='2'*64; older['quotes'][1]['takerStake']=2222; older['quotes'][1]['makerStake']=7778
+    older['status']['currentHeight']=974416
+    older['quotes'][0]['quoteId']='1'*64; older['quotes'][0]['takerStake']=1111; older['quotes'][0]['makerStake']=8889; older['quotes'][0]['expiryHeight']=974419
+    older['quotes'][1]['quoteId']='2'*64; older['quotes'][1]['takerStake']=2222; older['quotes'][1]['makerStake']=7778; older['quotes'][1]['expiryHeight']=974419
     page.evaluate('(book)=>{window.__book=book}',older)
     page.clock.fast_forward(20000)
     page.wait_for_function('window.__calls.length===2 && window.__active===0')
@@ -253,13 +258,36 @@ try:
     assert 0<=older_age<90000,older_age
     after_yes=page.locator('#yes-price').inner_text()
     after_no=page.locator('#no-price').inner_text()
-    assert after_yes=='1,111 sats' and after_no=='2,222 sats',(after_yes,after_no)
+    assert (after_yes,after_no)==('5,400 sats','6,000 sats'),(
+      f'fresh-but-older overwrite: expected YES 5,400 sats / NO 6,000 sats; '
+      f'got YES {after_yes} / NO {after_no}'
+    )
+    assert page.locator('#market-window').inner_text()==before_window
+    assert page.locator('#yes-detail').inner_text()==before_yes_detail
+    # A subsequent newer producer snapshot must still replace the retained book and expiry schedule.
+    recovery=copy.deepcopy(base)
+    recovery_timestamp=newer_timestamp+20000
+    recovery['status']['refreshedAt']=recovery_timestamp
+    recovery['status']['currentHeight']=974418
+    recovery['quotes'][0]['quoteId']='3'*64; recovery['quotes'][0]['takerStake']=7700; recovery['quotes'][0]['makerStake']=2300; recovery['quotes'][0]['expiryHeight']=974422
+    recovery['quotes'][1]['quoteId']='4'*64; recovery['quotes'][1]['takerStake']=8800; recovery['quotes'][1]['makerStake']=1200; recovery['quotes'][1]['expiryHeight']=974422
+    page.evaluate('(book)=>{window.__book=book}',recovery)
+    page.clock.fast_forward(20000)
+    page.wait_for_function('window.__calls.length===3 && window.__active===0')
+    page.wait_for_function("document.getElementById('market-status').textContent.includes('Dry-run')")
+    recovery_age=page.evaluate('(timestamp)=>Date.now()-timestamp',recovery_timestamp)
+    assert 0<=recovery_age<90000,recovery_age
+    assert page.locator('#yes-price').inner_text()=='7,700 sats'
+    assert page.locator('#no-price').inner_text()=='8,800 sats'
+    assert '30 blocks to close' in page.locator('#market-window').inner_text()
+    assert 'quote expires at block 974,422' in page.locator('#yes-detail').inner_text()
     assert all(c['method']=='GET' for c in page.evaluate('window.__calls'))
     assert blocked==[] and errors==[],(blocked,errors)
-    characterizations.append(
-      f'characterization/sequential-fresh-but-older-producer-snapshot: DEFECT — '
-      f'refreshedAt {newer_timestamp} -> {older_timestamp} ms (older age {older_age} ms < 90000); '
-      f'YES {before_yes} -> {after_yes}; NO {before_no} -> {after_no}'
+    regressions.append(
+      f'regression/sequential-fresh-but-older-producer-snapshot: PASS — '
+      f'refreshedAt {newer_timestamp} -> {older_timestamp} ms (older age {older_age} ms < 90000) retained '
+      f'YES {before_yes} / NO {before_no} and the newer expiry schedule; '
+      f'newer {recovery_timestamp} ms (age {recovery_age} ms) accepted YES 7,700 sats / NO 8,800 sats'
     )
     page.close()
     # Real served and file documents, unmodified configuration and history fetch.
@@ -276,5 +304,5 @@ finally:
   server.shutdown();server.server_close()
 print('\n'.join(results))
 print('\n'.join(focused))
-print('\n'.join(characterizations))
-print(f'{len(results)} fixture scenarios + {len(focused)} focused polling probes passed; {len(characterizations)} sequential-fresh-older characterization recorded; real served/file offline reads passed (production GET /quotes blocked before DNS); Receipts unchanged.')
+print('\n'.join(regressions))
+print(f'{len(results)} fixture scenarios + {len(focused)} focused polling probes + {len(regressions)} sequential fresh-older/newer-recovery regression passed; real served/file offline reads passed (production GET /quotes blocked before DNS); Receipts unchanged.')
