@@ -946,6 +946,7 @@
               s.refreshedAt < 0
             )
               throw new Error("Invalid book");
+            if (book && s.refreshedAt < book.status.refreshedAt) return;
             book = data;
             clearTimeout(expiryTimer);
             render();
